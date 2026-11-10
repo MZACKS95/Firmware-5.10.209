@@ -12,13 +12,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Install tools
+      - name: Install inspection tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             git python3 binutils gzip file xz-utils lz4 cpio kmod
 
-      - name: Download firmware
+      - name: Download firmware assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -34,13 +34,17 @@ jobs:
             --pattern "vendor_boot.img" \
             --dir images
 
-      - name: Download boot tools
+          echo "=== FIRMWARE FILES ==="
+          ls -lh images
+          sha256sum images/*
+
+      - name: Download Android boot tools
         run: |
           git clone --depth=1 \
             https://android.googlesource.com/platform/system/tools/mkbootimg \
             boot-tools
 
-      - name: Unpack images
+      - name: Unpack firmware images
         run: |
           mkdir -p unpacked/boot unpacked/vendor_boot
 
@@ -52,12 +56,21 @@ jobs:
             --boot_img images/vendor_boot.img \
             --out unpacked/vendor_boot
 
+          echo "=== BOOT FILES ==="
+          ls -lh unpacked/boot
+
+          echo "=== VENDOR BOOT FILES ==="
+          ls -lh unpacked/vendor_boot
+
       - name: Inspect phone kernel
         run: |
           set -e
 
           KERNEL=unpacked/boot/kernel
           RAW=unpacked/boot/kernel.raw
+
+          echo "=== ORIGINAL KERNEL ==="
+          file "$KERNEL"
 
           if gzip -t "$KERNEL" 2>/dev/null; then
             gzip -dc "$KERNEL" > "$RAW"
@@ -69,11 +82,11 @@ jobs:
             cp "$KERNEL" "$RAW"
           fi
 
-          echo "=== PHONE KERNEL VERSION ==="
+          echo "=== KERNEL VERSION ==="
           strings "$RAW" | grep -m 10 -E \
             'Linux version|5\.10\.[0-9]+' || true
 
-      - name: Extract phone configuration
+      - name: Extract phone kernel configuration
         run: |
           git clone --depth=1 \
             --branch android12-5.10-2024-05_r1 \
@@ -86,7 +99,7 @@ jobs:
             unpacked/boot/kernel.raw > phone.config \
             && [ -s phone.config ]; then
 
-            echo "=== PHONE CONFIGURATION ==="
+            echo "=== PHONE KERNEL CONFIGURATION ==="
 
             grep -E \
               '^(CONFIG_(LOCALVERSION|MODULES|MODVERSIONS|IKCONFIG|CFG80211|MAC80211|MT7601U|USB_SUPPORT|USB)=|# CONFIG_(CFG80211|MAC80211|MT7601U|USB_SUPPORT) is not set)' \
@@ -96,12 +109,11 @@ jobs:
             exit 1
           fi
 
-      - name: Extract vendor ramdisks safely
+      - name: Extract vendor ramdisks
         run: |
           set -e
 
           mkdir -p vendor-extracted
-          sudo chmod -R 755 vendor-extracted
 
           for RAMDISK in unpacked/vendor_boot/vendor_ramdisk*; do
             [ -f "$RAMDISK" ] || continue
@@ -112,37 +124,46 @@ jobs:
             sudo mkdir -p "$DEST"
 
             echo "=== EXTRACTING $NAME ==="
+            file "$RAMDISK"
 
             if gzip -t "$RAMDISK" 2>/dev/null; then
-              gzip -dc "$RAMDISK" | sudo cpio -idm --no-absolute-filenames -D "$DEST" 2>/dev/null || true
+              gzip -dc "$RAMDISK" |
+                sudo cpio -idm --no-absolute-filenames -D "$DEST"
             elif xz -t "$RAMDISK" 2>/dev/null; then
-              xz -dc "$RAMDISK" | sudo cpio -idm --no-absolute-filenames -D "$DEST" 2>/dev/null || true
+              xz -dc "$RAMDISK" |
+                sudo cpio -idm --no-absolute-filenames -D "$DEST"
             elif lz4 -t "$RAMDISK" 2>/dev/null; then
-              lz4 -dc "$RAMDISK" | sudo cpio -idm --no-absolute-filenames -D "$DEST" 2>/dev/null || true
+              lz4 -dc "$RAMDISK" |
+                sudo cpio -idm --no-absolute-filenames -D "$DEST"
             else
-              sudo cpio -idm --no-absolute-filenames -D "$DEST" < "$RAMDISK" 2>/dev/null || true
+              sudo cpio -idm --no-absolute-filenames -D "$DEST" < "$RAMDISK"
             fi
           done
 
-          sudo chmod -R a+rX vendor-extracted
+          echo "=== FIX FILE PERMISSIONS ==="
+          sudo chown -R "$(id -u):$(id -g)" vendor-extracted
+          sudo find vendor-extracted -type d -exec chmod 755 {} +
+          sudo find vendor-extracted -type f -exec chmod 644 {} +
 
           echo "=== MODULE FILES ==="
           find vendor-extracted -type f -name "*.ko" -print
 
-          echo "=== MODULE CONFIGURATION ==="
+          echo "=== MODULE LOADING CONFIGURATION ==="
           find vendor-extracted -type f \
             \( -name "modules.load" \
             -o -name "modules.dep" \
             -o -name "modules.alias" \) \
             -print -exec cat {} \;
 
-          echo "=== MODULE VERMAGIC ==="
+          echo "=== MODULE VERMAGIC AND DEPENDENCIES ==="
           find vendor-extracted -type f -name "*.ko" |
           while read -r MODULE; do
             echo "--- $MODULE ---"
             modinfo -F vermagic "$MODULE" 2>/dev/null || true
             modinfo -F depends "$MODULE" 2>/dev/null || true
           done
+
+          echo "=== VENDOR INSPECTION COMPLETE ==="
 
       - name: Upload inspection report
         uses: actions/upload-artifact@v4
@@ -151,5 +172,4 @@ jobs:
           path: |
             phone.config
             unpacked/boot/kernel.raw
-            vendor-extracted/
           if-no-files-found: ignore
