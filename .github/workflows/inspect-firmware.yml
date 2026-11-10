@@ -36,7 +36,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git python3 binutils gzip file xz-utils lz4
+            git python3 binutils gzip file xz-utils lz4 cpio
 
       - name: Download Android boot image tools
         run: |
@@ -109,11 +109,15 @@ jobs:
 
             echo "CONFIGURATION FOUND"
 
+            echo "=== IMPORTANT PHONE KERNEL CONFIGURATION ==="
+
             grep -E \
-              '^(CONFIG_LOCALVERSION|CONFIG_MODULES|CONFIG_MODVERSIONS|CONFIG_IKCONFIG|CONFIG_CFG80211|CONFIG_MAC80211|CONFIG_MT7601U|CONFIG_USB)=' \
+              '^(CONFIG_(LOCALVERSION|MODULES|MODVERSIONS|IKCONFIG|CFG80211|MAC80211|MT7601U|USB_SUPPORT|USB)=|# CONFIG_(CFG80211|MAC80211|MT7601U|USB_SUPPORT) is not set)' \
               phone.config || true
+
           else
             echo "IKCONFIG NOT FOUND IN PHONE KERNEL"
+            exit 1
           fi
 
       - name: Inspect vendor boot contents
