@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      - name: Install inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git python3 binutils gzip file xz-utils lz4 cpio kmod
+
       - name: Download firmware release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -31,12 +37,6 @@ jobs:
           echo "=== DOWNLOADED FILES ==="
           ls -lh images
           sha256sum images/*
-
-      - name: Install inspection tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git python3 binutils gzip file xz-utils lz4 cpio
 
       - name: Download Android boot image tools
         run: |
@@ -73,26 +73,18 @@ jobs:
           file "$KERNEL"
 
           if gzip -t "$KERNEL" 2>/dev/null; then
-            echo "Kernel compression: gzip"
             gzip -dc "$KERNEL" > "$RAW"
           elif xz -t "$KERNEL" 2>/dev/null; then
-            echo "Kernel compression: xz"
             xz -dc "$KERNEL" > "$RAW"
           elif lz4 -t "$KERNEL" 2>/dev/null; then
-            echo "Kernel compression: lz4"
             lz4 -dc "$KERNEL" > "$RAW"
           else
-            echo "Kernel is not directly recognized as gzip/xz/lz4."
             cp "$KERNEL" "$RAW"
           fi
 
-          echo "=== DECOMPRESSED KERNEL ==="
-          file "$RAW"
-          ls -lh "$RAW"
-
           echo "=== KERNEL VERSION ==="
           strings "$RAW" | grep -m 10 -E \
-            'Linux version|5\.10\.[0-9]+|android[0-9]+-[0-9]+\.[0-9]+' || true
+            'Linux version|5\.10\.[0-9]+' || true
 
       - name: Extract kernel configuration
         run: |
@@ -107,24 +99,64 @@ jobs:
             unpacked/boot/kernel.raw > phone.config \
             && [ -s phone.config ]; then
 
-            echo "CONFIGURATION FOUND"
-
             echo "=== IMPORTANT PHONE KERNEL CONFIGURATION ==="
 
             grep -E \
               '^(CONFIG_(LOCALVERSION|MODULES|MODVERSIONS|IKCONFIG|CFG80211|MAC80211|MT7601U|USB_SUPPORT|USB)=|# CONFIG_(CFG80211|MAC80211|MT7601U|USB_SUPPORT) is not set)' \
               phone.config || true
-
           else
-            echo "IKCONFIG NOT FOUND IN PHONE KERNEL"
+            echo "IKCONFIG NOT FOUND"
             exit 1
           fi
 
-      - name: Inspect vendor boot contents
+      - name: Inspect vendor kernel modules
         run: |
-          echo "=== VENDOR BOOT FILES ==="
-          find unpacked/vendor_boot \
-            -maxdepth 2 -type f -exec ls -lh {} \;
+          set -e
+
+          echo "=== VENDOR RAMDISK FILES ==="
+          find unpacked/vendor_boot -maxdepth 1 -type f -exec file {} \;
+
+          mkdir -p vendor-extracted
+
+          for RAMDISK in unpacked/vendor_boot/vendor_ramdisk*; do
+            [ -f "$RAMDISK" ] || continue
+
+            NAME=$(basename "$RAMDISK")
+            DEST="vendor-extracted/$NAME"
+            mkdir -p "$DEST"
+
+            echo "=== EXTRACTING $NAME ==="
+
+            if gzip -t "$RAMDISK" 2>/dev/null; then
+              gzip -dc "$RAMDISK" | (cd "$DEST" && cpio -idm --quiet)
+            elif xz -t "$RAMDISK" 2>/dev/null; then
+              xz -dc "$RAMDISK" | (cd "$DEST" && cpio -idm --quiet)
+            elif lz4 -t "$RAMDISK" 2>/dev/null; then
+              lz4 -dc "$RAMDISK" | (cd "$DEST" && cpio -idm --quiet)
+            else
+              (cd "$DEST" && cpio -idm --quiet < "../../$RAMDISK")
+            fi
+          done
+
+          echo "=== MODULE FILES ==="
+          find vendor-extracted -type f -name "*.ko" -print
+
+          echo "=== MODULE LOADING CONFIGURATION ==="
+          find vendor-extracted -type f \
+            \( -name "modules.load" \
+            -o -name "modules.dep" \
+            -o -name "modules.alias" \) \
+            -print -exec cat {} \;
+
+          echo "=== MODULE VERMAGIC AND DEPENDENCIES ==="
+          find vendor-extracted -type f -name "*.ko" |
+          while read -r MODULE; do
+            echo "--- $MODULE ---"
+            modinfo -F vermagic "$MODULE" 2>/dev/null || true
+            modinfo -F depends "$MODULE" 2>/dev/null || true
+          done
+
+          echo "=== INSPECTION COMPLETE ==="
 
       - name: Upload inspection report
         uses: actions/upload-artifact@v4
@@ -133,4 +165,5 @@ jobs:
           path: |
             phone.config
             unpacked/boot/kernel.raw
+            vendor-extracted/
           if-no-files-found: ignore
