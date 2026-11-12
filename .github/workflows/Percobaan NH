@@ -1,0 +1,145 @@
+name: Build Google GKI 5.10.209 - X6833B Baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Workflow
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Dependencies
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache cpio \
+            curl flex git libelf-dev libssl-dev \
+            lz4 pahole python3 rsync
+
+      - name: Setup 8GB Swap Space
+        run: |
+          set -e
+          echo "===== SETUP SWAP ====="
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          echo "===== MEMORY STATUS ====="
+          free -h
+          swapon --show
+
+      - name: Clone Kernel and Clang
+        run: |
+          set -e
+          echo "===== CLONE GOOGLE GKI ====="
+          git clone --depth=1 \
+            --branch android12-5.10-2024-05_r1 \
+            https://android.googlesource.com/kernel/common kernel_src
+          echo "===== DOWNLOAD AOSP CLANG ====="
+          mkdir -p clang-aosp
+          curl -L --fail --retry 3 \
+            -o clang.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          tar -xzf clang.tar.gz -C clang-aosp
+          rm clang.tar.gz
+          echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: gki-5.10.209-aosp-r416183b-${{ github.sha }}
+          restore-keys: |
+            gki-5.10.209-aosp-r416183b-
+          max-size: 4G
+
+      - name: Build Kernel
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE/kernel_src"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          JOBS=2
+          echo "===== BUILD CONFIGURATION ====="
+          echo "Architecture: $ARCH"
+          echo "Build jobs: $JOBS"
+          echo "Compiler:"
+          clang --version
+          echo "===== CCACHE BEFORE BUILD ====="
+          ccache -z
+          ccache -s
+          echo "===== GENERATE GKI DEFCONFIG ====="
+          make -j"$JOBS" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            gki_defconfig
+
+          echo "===== APPLY NETHUNTER CONFIG ====="
+          # Pake scripts/config biar aman, nggak ngerusak dependency
+          ./scripts/config --file out/.config \
+            -e WIRELESS -e WLAN -e WIRELESS_EXT -e RFKILL -e FW_LOADER \
+            -e TUN -e PACKET -e NETFILTER_XTABLES -e NETFILTER_XT_TARGET_MASQUERADE \
+            -e USB_GADGET -e USB_CONFIGFS -e USB_CONFIGFS_RNDIS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_ECM \
+            -e HID -e HID_GENERIC -e UHID -e INPUT_UINPUT \
+            -e CRYPTO_CCM -e CRYPTO_AES -e CRYPTO_ARC4 -e CRYPTO_USER \
+            -m CFG80211 -m MAC80211 \
+            -e MAC80211_RC_MINSTREL -e MAC80211_MESH -e MAC80211_LEDS \
+            -m MT7601U \
+            -d CFG80211_REQUIRE_SIGNED_REGDB
+
+          # Refresh config biar dependency ke-resolve otomatis
+          make -j"$JOBS" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            olddefconfig
+
+          echo "===== CEK CONFIG NETHUNTER ====="
+          grep -E "CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=|CONFIG_TUN=|CONFIG_USB_CONFIGFS=" out/.config || true
+
+          echo "===== START KERNEL COMPILATION ====="
+          make -j"$JOBS" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache clang" \
+            Image modules
+          echo "===== CCACHE AFTER BUILD ====="
+          ccache -s
+          echo "===== BUILD COMPLETED ====="
+
+      - name: Prepare Artifacts
+        run: |
+          set -e
+          mkdir -p artifacts/modules
+          cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
+          find kernel_src/out -name '*.ko' \
+            -exec cp {} artifacts/modules/ \;
+          echo "===== ARTIFACT CONTENTS ====="
+          ls -lh artifacts/
+          ls -lh artifacts/modules/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Google-GKI-5.10.209-X6833B-Baseline
+          path: artifacts/
+          retention-days: 14
