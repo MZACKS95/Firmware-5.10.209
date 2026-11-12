@@ -1,4 +1,4 @@
-name: Build Google GKI 5.10.209 - X6833B Baseline
+name: Build Google GKI 5.10.209 - X6833B Nethunter
 
 on:
   workflow_dispatch:
