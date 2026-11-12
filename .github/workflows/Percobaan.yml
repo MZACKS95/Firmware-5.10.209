@@ -1,0 +1,41 @@
+name: Build Google GKI 5.10.209 - X6833B Baseline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio curl flex git libelf-dev libssl-dev lz4 pahole python3 rsync
+
+      - name: Clone Kernel and Clang
+        run: |
+          git clone --depth=1 --branch android12-5.10-2024-05_r1 https://android.googlesource.com/kernel/common kernel_src
+          mkdir -p clang-aosp
+          curl -L -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          tar -xzf clang.tar.gz -C clang-aosp
+          rm clang.tar.gz
+          echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
+
+      - name: Build Kernel
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src"
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
+          make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- Image modules
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p artifacts/modules
+          cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
+          find kernel_src/out -name '*.ko' -exec cp {} artifacts/modules/ \;
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Google-GKI-5.10.209-X6833B-Baseline
+          path: artifacts/
+          retention-days: 14
