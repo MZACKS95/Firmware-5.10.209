@@ -90,14 +90,11 @@ jobs:
           # Pake scripts/config biar aman, nggak ngerusak dependency
           ./scripts/config --file out/.config \
             -e WIRELESS -e WLAN -e WIRELESS_EXT -e RFKILL -e FW_LOADER \
-            -e TUN -e PACKET -e NETFILTER_XTABLES -e NETFILTER_XT_TARGET_MASQUERADE \
+            -e PACKET -e NETFILTER_XTABLES -e NETFILTER_XT_TARGET_MASQUERADE \
             -e USB_GADGET -e USB_CONFIGFS -e USB_CONFIGFS_RNDIS -e USB_CONFIGFS_ACM -e USB_CONFIGFS_ECM \
-            -e HID -e HID_GENERIC -e UHID -e INPUT_UINPUT \
-            -e CRYPTO_CCM -e CRYPTO_AES -e CRYPTO_ARC4 -e CRYPTO_USER \
             -m CFG80211 -m MAC80211 \
             -e MAC80211_RC_MINSTREL -e MAC80211_MESH -e MAC80211_LEDS \
-            -m MT7601U \
-            -d CFG80211_REQUIRE_SIGNED_REGDB
+            -e CONFIG_WLAN_VENDOR_MEDIATEK
 
           # Refresh config biar dependency ke-resolve otomatis
           make -j"$JOBS" \
@@ -110,7 +107,7 @@ jobs:
             olddefconfig
 
           echo "===== CEK CONFIG NETHUNTER ====="
-          grep -E "CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=|CONFIG_TUN=|CONFIG_USB_CONFIGFS=" out/.config || true
+          grep -E "CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_WLAN_VENDOR_MEDIATEK=|CONFIG_USB_CONFIGFS=" out/.config || true
 
           echo "===== START KERNEL COMPILATION ====="
           make -j"$JOBS" \
