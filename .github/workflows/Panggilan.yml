@@ -1,5 +1,5 @@
 
-name: Build Google GKI 5.10.209 - X6833B Baseline + MT7601U
+name: Build Google GKI 5.10.209 - X6833B MT7601U Module
 
 on:
   workflow_dispatch:
@@ -20,7 +20,9 @@ jobs:
       - name: Install Dependencies
         run: |
           set -e
+
           sudo apt-get update
+
           sudo apt-get install -y \
             bc bison build-essential ccache cpio \
             curl flex git libelf-dev libssl-dev \
@@ -29,6 +31,7 @@ jobs:
       - name: Setup 8GB Swap Space
         run: |
           set -e
+
           echo "===== SETUP SWAP ====="
 
           sudo fallocate -l 8G /mnt/swapfile
@@ -37,12 +40,14 @@ jobs:
           sudo swapon /mnt/swapfile
 
           echo "===== MEMORY STATUS ====="
+
           free -h
           swapon --show
 
       - name: Clone Kernel and Clang
         run: |
           set -e
+
           echo "===== CLONE GOOGLE GKI ====="
 
           git clone --depth=1 \
@@ -58,6 +63,7 @@ jobs:
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
 
           tar -xzf clang.tar.gz -C clang-aosp
+
           rm clang.tar.gz
 
           echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
@@ -73,6 +79,7 @@ jobs:
       - name: Build Kernel
         run: |
           set -e
+
           cd "$GITHUB_WORKSPACE/kernel_src"
 
           export ARCH=arm64
@@ -81,13 +88,33 @@ jobs:
           JOBS=2
 
           echo "===== BUILD CONFIGURATION ====="
+
           echo "Architecture: $ARCH"
           echo "Build jobs: $JOBS"
+
           clang --version
 
           echo "===== CCACHE BEFORE BUILD ====="
+
           ccache -z
           ccache -s
+
+          echo "===== CHECK MT7601U SOURCE ====="
+
+          if ! grep -Rqs \
+            'config MT7601U' \
+            drivers/net/wireless; then
+
+            echo "ERROR: MT7601U Kconfig is not present in this kernel source."
+
+            find drivers/net/wireless -maxdepth 4 -type f \
+              \( -name 'Kconfig' -o -name 'Makefile' \) \
+              | sort
+
+            exit 1
+          fi
+
+          echo "MT7601U source configuration found."
 
           echo "===== GENERATE GKI DEFCONFIG ====="
 
@@ -103,11 +130,15 @@ jobs:
           echo "===== ENABLE MT7601U DRIVER ====="
 
           scripts/config --file out/.config \
+            -e WLAN \
+            -e WLAN_VENDOR_MEDIATEK \
             -m CFG80211 \
             -m MAC80211 \
             -m MT7601U \
             -e USB \
             -e FW_LOADER
+
+          echo "===== APPLY KERNEL CONFIGURATION ====="
 
           make -j"$JOBS" \
             O=out \
@@ -120,12 +151,27 @@ jobs:
 
           echo "===== VERIFY MT7601U CONFIGURATION ====="
 
-          grep -E 'CONFIG_(CFG80211|MAC80211|MT7601U|USB|FW_LOADER)=' out/.config
+          grep -E \
+            'CONFIG_(WLAN|WLAN_VENDOR_MEDIATEK|CFG80211|MAC80211|MT7601U|USB|FW_LOADER)=' \
+            out/.config || true
 
           grep -q '^CONFIG_MT7601U=m$' out/.config || {
-            echo "ERROR: CONFIG_MT7601U is not enabled as module"
+            echo "ERROR: CONFIG_MT7601U is not enabled as module."
+            echo "Check MT7601U Kconfig dependencies."
             exit 1
           }
+
+          grep -q '^CONFIG_CFG80211=m$' out/.config || {
+            echo "ERROR: CONFIG_CFG80211 is not enabled as module."
+            exit 1
+          }
+
+          grep -q '^CONFIG_MAC80211=m$' out/.config || {
+            echo "ERROR: CONFIG_MAC80211 is not enabled as module."
+            exit 1
+          }
+
+          echo "===== FINAL CONFIGURATION VERIFIED ====="
 
           echo "===== START KERNEL COMPILATION ====="
 
@@ -141,15 +187,21 @@ jobs:
 
           echo "===== VERIFY MT7601U MODULE ====="
 
-          find out -type f -name 'mt7601u.ko' -print
+          MODULE_PATH=$(find out -type f \
+            -name 'mt7601u.ko' -print -quit)
 
-          test -f out/drivers/net/wireless/mediatek/mt7601u/mt7601u.ko || {
-            echo "ERROR: mt7601u.ko was not generated at the expected path"
-            find out -type f -name 'mt7601u.ko'
+          if [ -z "$MODULE_PATH" ]; then
+            echo "ERROR: mt7601u.ko was not generated."
             exit 1
-          }
+          fi
+
+          echo "MT7601U MODULE FOUND:"
+          echo "$MODULE_PATH"
+
+          ls -lh "$MODULE_PATH"
 
           echo "===== CCACHE AFTER BUILD ====="
+
           ccache -s
 
           echo "===== BUILD COMPLETED ====="
@@ -158,20 +210,46 @@ jobs:
         run: |
           set -e
 
+          cd "$GITHUB_WORKSPACE"
+
           mkdir -p artifacts/modules
 
-          cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
+          echo "===== COPY KERNEL IMAGE ====="
 
           cp \
-            kernel_src/out/drivers/net/wireless/mediatek/mt7601u/mt7601u.ko \
+            kernel_src/out/arch/arm64/boot/Image \
+            artifacts/Image
+
+          echo "===== COPY MT7601U MODULE ====="
+
+          MODULE_PATH=$(find kernel_src/out -type f \
+            -name 'mt7601u.ko' -print -quit)
+
+          test -n "$MODULE_PATH"
+
+          cp "$MODULE_PATH" \
             artifacts/modules/mt7601u.ko
 
-          cp kernel_src/out/.config artifacts/kernel.config
-          cp kernel_src/out/Module.symvers artifacts/Module.symvers
+          echo "===== COPY BUILD CONFIGURATION ====="
+
+          cp \
+            kernel_src/out/.config \
+            artifacts/kernel.config
+
+          if [ -f kernel_src/out/Module.symvers ]; then
+            cp \
+              kernel_src/out/Module.symvers \
+              artifacts/Module.symvers
+          fi
 
           echo "===== ARTIFACT CONTENTS ====="
+
           ls -lh artifacts/
           ls -lh artifacts/modules/
+
+          echo "===== MODULE VERIFICATION ====="
+
+          file artifacts/modules/mt7601u.ko
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
