@@ -89,9 +89,6 @@ jobs:
           echo "===== APPLY NETHUNTER CONFIG ====="
           # Pake scripts/config biar aman, nggak ngerusak dependency
           ./scripts/config --file out/.config \
-            -m CFG80211 -m MAC80211 \
-            -e MAC80211_MESH \
-            -e MAC80211_LEDS \
             -e WLAN_VENDOR_MEDIATEK
 
           # Refresh config biar dependency ke-resolve otomatis
@@ -105,7 +102,7 @@ jobs:
             olddefconfig
 
           echo "===== CEK CONFIG NETHUNTER ====="
-          grep -E "CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_WLAN_VENDOR_MEDIATEK=" out/.config || true
+          grep -E "CONFIG_WLAN_VENDOR_MEDIATEK=" out/.config || true
 
           echo "===== START KERNEL COMPILATION ====="
           make -j"$JOBS" \
