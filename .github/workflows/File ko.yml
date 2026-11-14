@@ -1,4 +1,4 @@
-name: Build panggl ko
+name: Build panggil ko
 
 on:
   workflow_dispatch:
@@ -105,6 +105,7 @@ jobs:
           ./scripts/config --file out/.config \
             -e WIRELESS \
             -m CFG80211 -m MAC80211 -m MT7601U \
+            -m MT76 -m MT76_USB -m MT76x02_LIB -m MT76x02_USB \
             -m RFKILL -m LIB80211 -m LIBARC4 \
             -m MAC80211_RC_MINSTREL -m MAC80211_RC_DEFAULT_MINSTREL \
             -d CFG80211_REQUIRE_SIGNED_REGDB -d CFG80211_CERTIFICATION_ONUS
@@ -121,7 +122,7 @@ jobs:
             olddefconfig
 
           echo "===== CEK CONFIG MT7601U ====="
-          grep -E "CONFIG_WIRELESS=|CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=|CONFIG_RFKILL=|CONFIG_LIB80211=|CONFIG_LIBARC4=" out/.config || true
+          grep -E "CONFIG_WIRELESS=|CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=|CONFIG_MT76=|CONFIG_MT76_USB=|CONFIG_MT76x02_LIB=|CONFIG_MT76x02_USB=|CONFIG_RFKILL=|CONFIG_LIB80211=|CONFIG_LIBARC4=" out/.config || true
 
           echo "===== START KERNEL COMPILATION ====="
 
@@ -148,7 +149,7 @@ jobs:
 
           cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
 
-          for ko in cfg80211.ko mac80211.ko mt7601u.ko rfkill.ko lib80211.ko libarc4.ko; do
+          for ko in cfg80211.ko mac80211.ko mt7601u.ko mt76.ko mt76-usb.ko mt76x02-lib.ko mt76x02-usb.ko rfkill.ko lib80211.ko libarc4.ko; do
             find kernel_src/out -name "$ko" -exec cp {} artifacts/modules/ \;
           done
 
