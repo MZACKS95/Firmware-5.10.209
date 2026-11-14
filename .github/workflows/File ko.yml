@@ -60,19 +60,23 @@ jobs:
           tar -xJf linux-5.10.tar.xz -C /tmp/vanilla linux-5.10/drivers/net/wireless/mediatek
           rm linux-5.10.tar.xz
           echo "===== CEK DRIVER VANILLA ====="
-          ls /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt76/ | head -n 30
-          ls /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt76/mt7601u* || true
+          ls /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/
+          echo "--- ISI MT7601U ---"
+          ls /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt7601u/ || true
+          echo "--- ISI MT76 ---"
+          ls /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt76/ | head -n 20 || true
           echo "===== COPY KE GKI ====="
           mkdir -p kernel_src/drivers/net/wireless/mediatek
-          cp -r /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt76 kernel_src/drivers/net/wireless/mediatek/
+          cp -r /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt76 kernel_src/drivers/net/wireless/mediatek/ || true
+          cp -r /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/mt7601u kernel_src/drivers/net/wireless/mediatek/
           cp /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/Kconfig kernel_src/drivers/net/wireless/mediatek/Kconfig
           cp /tmp/vanilla/linux-5.10/drivers/net/wireless/mediatek/Makefile kernel_src/drivers/net/wireless/mediatek/Makefile
           echo "===== HOOK KE PARENT KCONFIG / MAKEFILE ====="
           grep -q "mediatek" kernel_src/drivers/net/wireless/Kconfig || echo 'source "drivers/net/wireless/mediatek/Kconfig"' >> kernel_src/drivers/net/wireless/Kconfig
           grep -q "mediatek" kernel_src/drivers/net/wireless/Makefile || echo 'obj-$(CONFIG_WLAN_VENDOR_MEDIATEK) += mediatek/' >> kernel_src/drivers/net/wireless/Makefile
           echo "===== VERIFIKASI INJECT ====="
-          ls kernel_src/drivers/net/wireless/mediatek/mt76/ | grep mt7601u
-          grep -rn "MT7601U" kernel_src/drivers/net/wireless/mediatek/mt76/Kconfig | head
+          ls kernel_src/drivers/net/wireless/mediatek/mt7601u/ || true
+          grep -rn "MT7601U" kernel_src/drivers/net/wireless/mediatek/mt7601u/Kconfig | head || true
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -104,7 +108,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             gki_defconfig
           echo "===== DEBUG KCONFIG MT7601U ====="
-          grep -A 10 "config MT7601U" drivers/net/wireless/mediatek/mt76/Kconfig || true
+          grep -A 10 "config MT7601U" drivers/net/wireless/mediatek/mt7601u/Kconfig || true
           echo "===== APPLY CONFIG MINIMAL MT7601U ====="
           ./scripts/config --file out/.config \
             -e WIRELESS -e WLAN -e WLAN_VENDOR_MEDIATEK \
