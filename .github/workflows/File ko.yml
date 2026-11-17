@@ -21,14 +21,11 @@ jobs:
           ls kernel/arch/arm64/configs/mgk_64_k510_defconfig
           ls kernel/arch/arm64/configs/gki_defconfig
 
-      - name: Get Clang 12.0.5
+      - name: Get Clang r416183b - AOSP
         run: |
-          mkdir -p clang
-          cd clang
-          curl -L -o clang.tar.gz https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/120505/clang-120505.tar.gz
-          tar -xf clang.tar.gz
-          ls bin/clang
-          ./bin/clang --version
+          git clone --depth 1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b.git clang
+          ls clang/bin/clang
+          ./clang/bin/clang --version
 
       - name: Build mt7601u.ko
         run: |
@@ -61,7 +58,7 @@ jobs:
 
           make O=out -j$(nproc) modules_prepare
 
-          # 4. Build cuma driver mt7601u yang di dalam kernel, nggak perlu clone luar
+          # 4. Build cuma driver mt7601u yang di dalam kernel
           make O=out M=drivers/net/wireless/mediatek/mt7601u \
             ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
