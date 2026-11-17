@@ -60,25 +60,33 @@ jobs:
 
           make O=out -j$(nproc) modules_prepare
 
-          echo "=== FIX trace.h Clang error ==="
-          echo "--- SEBELUM ---"
-          cat drivers/net/wireless/mediatek/mt7601u/trace.h
-          cat drivers/net/wireless/mediatek/mt7601u/trace.c
+          echo "=== FIX trace.h - pakai isi asli yang lu kirim ==="
+          echo "--- SEBELUM (5 baris terakhir) ---"
+          tail -n 10 drivers/net/wireless/mediatek/mt7601u/trace.h
 
-          sed -i 's|#define TRACE_INCLUDE_PATH \.|#define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u|' drivers/net/wireless/mediatek/mt7601u/trace.h
-          grep -q "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.h || sed -i '/define_trace.h/i #define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u' drivers/net/wireless/mediatek/mt7601u/trace.h
-          sed -i '/#define CREATE_TRACE_POINTS/a #define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u' drivers/net/wireless/mediatek/mt7601u/trace.c || true
+          python3 - << 'PYEOF'
+          import pathlib
+          p = pathlib.Path("drivers/net/wireless/mediatek/mt7601u/trace.h")
+          txt = p.read_text()
+          old = "#define TRACE_INCLUDE_PATH ."
+          new = "#define TRACE_INCLUDE_PATH drivers/net/wireless/mediatek/mt7601u"
+          print(f"Ketemu baris lama: {txt.count(old)} kali")
+          assert txt.count(old) == 1, "BARIS LAMA TIDAK KETEMU, STOP, JANGAN LANJUT"
+          txt = txt.replace(old, new)
+          p.write_text(txt)
+          print("Patch sukses")
+          PYEOF
 
-          echo "--- SESUDAH ---"
-          cat drivers/net/wireless/mediatek/mt7601u/trace.h
-          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.h || true
-          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.c || true
+          echo "--- SESUDAH (5 baris terakhir) ---"
+          tail -n 10 drivers/net/wireless/mediatek/mt7601u/trace.h
+          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.h
 
+          echo "=== Build dengan -I eksplisit ==="
           make O=out M=drivers/net/wireless/mediatek/mt7601u \
             ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            KCFLAGS="-Wno-error" \
+            KCFLAGS="-Wno-error -I$PWD/drivers/net/wireless/mediatek/mt7601u -I$PWD" \
             modules -j1 V=1
 
           echo "=== RESULT ==="
