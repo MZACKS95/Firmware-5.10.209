@@ -21,11 +21,15 @@ jobs:
           ls kernel/arch/arm64/configs/mgk_64_k510_defconfig
           ls kernel/arch/arm64/configs/gki_defconfig
 
-      - name: Get Clang r416183b - AOSP
+      - name: Get Clang r416183b - AOSP Android12
         run: |
-          git clone --depth 1 https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b.git clang
-          ls clang/bin/clang
-          ./clang/bin/clang --version
+          mkdir -p clang
+          cd clang
+          curl -L -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          ls -lh clang.tar.gz
+          tar -xf clang.tar.gz
+          ls bin/clang
+          ./bin/clang --version
 
       - name: Build mt7601u.ko
         run: |
