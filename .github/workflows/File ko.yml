@@ -60,15 +60,22 @@ jobs:
 
           make O=out -j$(nproc) modules_prepare
 
+          echo "=== FIX trace.c Clang error ==="
+          cat drivers/net/wireless/mediatek/mt7601u/trace.c
+          sed -i 's|#define TRACE_INCLUDE_PATH \.|#define TRACE_INCLUDE_PATH drivers/net/wireless/mediatek/mt7601u|' drivers/net/wireless/mediatek/mt7601u/trace.c
+          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.c
+
           make O=out M=drivers/net/wireless/mediatek/mt7601u \
             ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
+            KCFLAGS="-Wno-error" \
             modules -j1 V=1
 
           echo "=== RESULT ==="
           find out -name "mt7601u.ko" | head -n 20
           ls -lh out/drivers/net/wireless/mediatek/mt7601u/ || true
+          find out -name "mt7601u.ko" -exec modinfo {} \; | grep -E "vermagic|depends|filename" || true
 
       - name: Collect artifact
         run: |
