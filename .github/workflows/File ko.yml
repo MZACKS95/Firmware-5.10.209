@@ -60,11 +60,18 @@ jobs:
 
           make O=out -j$(nproc) modules_prepare
 
-          echo "=== FIX trace.c Clang error ==="
+          echo "=== FIX trace.h Clang error ==="
+          echo "--- SEBELUM ---"
+          cat drivers/net/wireless/mediatek/mt7601u/trace.h
           cat drivers/net/wireless/mediatek/mt7601u/trace.c
-          sed -i '/#define CREATE_TRACE_POINTS/a #define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u' drivers/net/wireless/mediatek/mt7601u/trace.c
-          echo "--- SETELAH FIX ---"
-          cat drivers/net/wireless/mediatek/mt7601u/trace.c
+
+          sed -i 's|#define TRACE_INCLUDE_PATH \.|#define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u|' drivers/net/wireless/mediatek/mt7601u/trace.h
+          grep -q "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.h || sed -i '/define_trace.h/i #define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u' drivers/net/wireless/mediatek/mt7601u/trace.h
+          sed -i '/#define CREATE_TRACE_POINTS/a #define TRACE_INCLUDE_PATH drivers\/net\/wireless\/mediatek\/mt7601u' drivers/net/wireless/mediatek/mt7601u/trace.c || true
+
+          echo "--- SESUDAH ---"
+          cat drivers/net/wireless/mediatek/mt7601u/trace.h
+          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.h || true
           grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.c || true
 
           make O=out M=drivers/net/wireless/mediatek/mt7601u \
