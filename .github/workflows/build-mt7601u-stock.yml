@@ -1,0 +1,62 @@
+name: Build mt7601u Numpang Stock
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev python3
+
+      - name: Clone kernel GKI 5.10.209
+        run: |
+          git clone --depth 1 -b android12-5.10 https://android.googlesource.com/kernel/common kernel
+          ls kernel
+
+      - name: Buat Module.symvers dari stock Infinix
+        run: |
+          ls -lh cfg80211.ko mac80211.ko
+          nm mac80211.ko | grep "__crc_" > crc.txt
+          nm cfg80211.ko | grep "__crc_" >> crc.txt
+          
+          python3 - << 'PY'
+          with open("crc.txt") as f, open("Module.symvers.new","w") as out:
+              for line in f:
+                  parts = line.split()
+                  if len(parts) < 3: continue
+                  crc = parts[0]
+                  sym = parts[2].replace("__crc_","")
+                  mod = "mac80211"
+                  if "cfg80211" in sym or "wiphy" in sym or "regulatory" in sym:
+                      mod = "cfg80211"
+                  out.write(f"0x{crc}\t{sym}\t{mod}\tEXPORT_SYMBOL_GPL\t\n")
+          print("Selesai")
+          PY
+          wc -l Module.symvers.new
+          grep ieee80211_alloc_hw_nm Module.symvers.new
+          cp Module.symvers.new kernel/Module.symvers
+
+      - name: Build mt7601u doang
+        run: |
+          cd kernel
+          make ARCH=arm64 gki_defconfig
+          echo "CONFIG_CFG80211=m" >> .config
+          echo "CONFIG_MAC80211=m" >> .config
+          echo "CONFIG_MT7601U=m" >> .config
+          make ARCH=arm64 olddefconfig
+          cp ../Module.symvers.new ./Module.symvers
+          make ARCH=arm64 M=drivers/net/wireless/mediatek/mt7601u modules -j$(nproc)
+          ls -lh drivers/net/wireless/mediatek/mt7601u/mt7601u.ko
+          modinfo drivers/net/wireless/mediatek/mt7601u/mt7601u.ko | grep vermagic
+
+      - name: Upload hasil
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt7601u-stock
+          path: kernel/drivers/net/wireless/mediatek/mt7601u/mt7601u.ko
