@@ -17,7 +17,12 @@ jobs:
         run: |
           git clone --depth 1 --branch emerald_r-u-oss \
             https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git kernel
-          ls kernel/arch/arm64/configs/mgk_64_k510_defconfig
+          echo "=== CEK CONFIG XIAOMI ASLI ==="
+          grep -n "WLAN_VENDOR_MEDIATEK\|CONFIG_MT7601U\|CONFIG_WLAN" kernel/arch/arm64/configs/mgk_64_k510_defconfig || echo "TIDAK ADA DI CONFIG XIAOMI"
+          echo "=== Kconfig mt7601u ==="
+          cat kernel/drivers/net/wireless/mediatek/mt7601u/Kconfig
+          echo "=== Makefile mt7601u ==="
+          cat kernel/drivers/net/wireless/mediatek/mt7601u/Makefile
 
       - name: Get Clang r416183b - AOSP Android12
         run: |
@@ -44,6 +49,8 @@ jobs:
           ./scripts/kconfig/merge_config.sh -m -O out out/.config \
             arch/arm64/configs/mgk_64_k510_defconfig
 
+          # Paksa nyalain semua dependency-nya dulu, URUT
+          # Ini yang tadi terbukti BELUM ADA di config Xiaomi
           echo "CONFIG_WLAN=y" >> out/.config
           echo "CONFIG_WIRELESS=y" >> out/.config
           echo "CONFIG_WLAN_VENDOR_MEDIATEK=y" >> out/.config
@@ -55,40 +62,25 @@ jobs:
 
           make O=out olddefconfig
 
-          echo "=== CHECK CONFIG ==="
-          grep -E "CONFIG_WLAN_VENDOR_MEDIATEK|CONFIG_MT7601U|CONFIG_CFG80211=|CONFIG_MAC80211=" out/.config || true
+          echo "=== CHECK CONFIG SETELAH olddefconfig ==="
+          grep -E "CONFIG_WLAN_VENDOR_MEDIATEK|CONFIG_MT7601U|CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_WLAN=|CONFIG_WIRELESS=" out/.config || true
 
           make O=out -j$(nproc) modules_prepare
 
-          echo "=== FIX trace.c Clang error ==="
-          cat drivers/net/wireless/mediatek/mt7601u/trace.c
-          sed -i 's|#define TRACE_INCLUDE_PATH \.|#define TRACE_INCLUDE_PATH drivers/net/wireless/mediatek/mt7601u|' drivers/net/wireless/mediatek/mt7601u/trace.c
-          grep -n "TRACE_INCLUDE_PATH" drivers/net/wireless/mediatek/mt7601u/trace.c
-
+          echo "=== BUILD MT7601U SAJA, VERBOSE ==="
           make O=out M=drivers/net/wireless/mediatek/mt7601u \
             ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            KCFLAGS="-Wno-error" \
             modules -j1 V=1
 
           echo "=== RESULT ==="
-          find out -name "mt7601u.ko" | head -n 20
+          find out -name "*.ko" | grep -i mt7601 || true
           ls -lh out/drivers/net/wireless/mediatek/mt7601u/ || true
           find out -name "mt7601u.ko" -exec modinfo {} \; | grep -E "vermagic|depends|filename" || true
 
-      - name: Collect artifact
-        run: |
-          mkdir -p artifact
-          find kernel/out -name "mt7601u.ko" -exec cp -v {} artifact/ \;
-          find kernel/out -name "cfg80211.ko" -exec cp -v {} artifact/ \; || true
-          find kernel/out -name "mac80211.ko" -exec cp -v {} artifact/ \; || true
-          ls -lh artifact/
-
       - name: Upload
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: mt7601u-emerald-mt6789
-          path: artifact/
-          if-no-files-found: error
+          path: kernel/out/drivers/net/wireless/mediatek/mt7601u/*.ko
