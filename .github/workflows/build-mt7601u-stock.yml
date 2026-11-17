@@ -46,15 +46,21 @@ jobs:
         run: |
           cd kernel
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
+          # Ini yang kemarin kurang, harus urut
+          echo "CONFIG_WLAN=y" >> .config
+          echo "CONFIG_WLAN_VENDOR_MEDIATEK=y" >> .config
           echo "CONFIG_CFG80211=m" >> .config
           echo "CONFIG_MAC80211=m" >> .config
           echo "CONFIG_MT7601U=m" >> .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          # Cek beneran ke-set apa nggak
+          grep -E "WLAN|MT7601U|CFG80211|MAC80211" .config
+          ls -lh drivers/net/wireless/mediatek/mt7601u/
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- scripts -j$(nproc)
-          ls -lh scripts/mod/modpost
           cp ../Module.symvers.new ./Module.symvers
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/net/wireless/mediatek/mt7601u modules -j$(nproc)
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/net/wireless/mediatek/mt7601u modules -j$(nproc) V=1
+          find drivers -name "mt7601u.ko"
           ls -lh drivers/net/wireless/mediatek/mt7601u/mt7601u.ko
           modinfo drivers/net/wireless/mediatek/mt7601u/mt7601u.ko | grep vermagic
 
