@@ -1,5 +1,5 @@
 
-name: Build infinix stock
+name: Build Google GKI 5.10.209 - X6833B Baseline
 
 on:
   workflow_dispatch:
@@ -139,11 +139,34 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-          echo "===== VERIFY LOCALVERSION CONFIG ====="
+          echo "===== SYNCHRONIZE GENERATED CONFIGURATION ====="
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            syncconfig
+
+          echo "===== VERIFY .CONFIG ====="
 
           grep -E '^CONFIG_LOCALVERSION=|^# CONFIG_LOCALVERSION_AUTO' out/.config
 
+          echo "===== VERIFY AUTO.CONF ====="
+
+          grep -F 'CONFIG_LOCALVERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"' \
+            out/include/config/auto.conf
+
+          if grep -q '^CONFIG_LOCALVERSION_AUTO=y' out/include/config/auto.conf; then
+            echo "ERROR: CONFIG_LOCALVERSION_AUTO is enabled!"
+            exit 1
+          fi
+
           echo "===== VERIFY KERNEL RELEASE ====="
+
+          rm -f out/include/config/kernel.release
 
           KERNEL_RELEASE=$(make -s \
             O=out \
