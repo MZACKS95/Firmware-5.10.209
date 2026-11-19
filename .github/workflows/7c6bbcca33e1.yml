@@ -44,12 +44,28 @@ jobs:
         run: |
           set -e
 
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          echo "===== CHECK EXISTING SWAP ====="
 
           free -h
+          swapon --show
+
+          if swapon --show=NAME --noheadings | grep -qx '/swapfile'; then
+            echo "/swapfile is already active."
+          else
+            if [ -e /swapfile ]; then
+              sudo rm -f /swapfile
+            fi
+
+            sudo fallocate -l 8G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+          fi
+
+          echo "===== SWAP STATUS ====="
+
+          free -h
+          swapon --show
 
       - name: Clone Kernel and Clang
         run: |
@@ -147,11 +163,11 @@ jobs:
 
           ./scripts/config \
             --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-android12-9-00016-g7c6bbcca33e1-ab12029497"
+            --set-str LOCALVERSION "-android12-9-00016-g7c6bbcca33e1-ab12029497"
 
           ./scripts/config \
             --file out/.config \
-            --disable CONFIG_LOCALVERSION_AUTO
+            --disable LOCALVERSION_AUTO
 
           echo "===== OLDDEFCONFIG ====="
 
@@ -229,7 +245,6 @@ jobs:
 
           if [ -s out/modules.order ]; then
             echo "FOUND: out/modules.order"
-            ls -lh out/modules.order
 
             cp out/modules.order \
               "$GITHUB_WORKSPACE/artifacts/"
