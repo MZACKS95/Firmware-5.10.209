@@ -1,4 +1,4 @@
-name: Build infinix stock google
+name: Build infinix stock
 
 on:
   workflow_dispatch:
@@ -117,10 +117,16 @@ jobs:
       - name: Setup AOSP Clang PATH
         run: |
           set -e
+
+          export PATH="$GITHUB_WORKSPACE/clang-aosp/bin:$PATH"
           echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
 
-          echo "===== VERIFY CLANG ====="
+          echo "===== VERIFY AOSP CLANG ====="
+          command -v clang
           clang --version
+
+          echo "===== VERIFY LLD ====="
+          command -v ld.lld
           ld.lld --version
 
       # ==========================================
