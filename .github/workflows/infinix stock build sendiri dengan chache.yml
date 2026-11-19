@@ -1,4 +1,4 @@
-name: Build infinix stock
+name: Build infinix stock google
 
 on:
   workflow_dispatch:
