@@ -1,5 +1,4 @@
-
-name: Build stock infinix
+name: Build infinix stock
 
 on:
   workflow_dispatch:
@@ -20,193 +19,148 @@ jobs:
       - name: Install Dependencies
         run: |
           set -e
-
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            ccache \
-            cpio \
-            curl \
-            flex \
-            git \
-            libelf-dev \
-            libssl-dev \
-            lz4 \
-            pahole \
-            python3 \
-            rsync \
-            zstd
+            bc bison build-essential ccache cpio \
+            curl flex git libelf-dev libssl-dev \
+            lz4 pahole python3 rsync
 
       - name: Setup 8GB Swap Space
         run: |
           set -e
-
-          echo "===== CHECK EXISTING SWAP ====="
-          free -h
-          swapon --show
-
-          if swapon --show=NAME --noheadings | grep -qx '/swapfile'; then
-            echo "/swapfile is already active."
-          elif swapon --show --noheadings | grep -q .; then
-            echo "Existing swap detected. No additional swap needed."
-          else
-            if [ -e /swapfile ]; then
-              sudo rm -f /swapfile
-            fi
-
-            sudo fallocate -l 8G /swapfile
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
-          fi
-
-          echo "===== SWAP STATUS ====="
+          echo "===== SETUP SWAP ====="
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          echo "===== MEMORY STATUS ====="
           free -h
           swapon --show
 
       - name: Clone Kernel and Clang
         run: |
           set -e
-
-          KERNEL_COMMIT="7c6bbcca33e1734642601acf07a14140116fa956"
-
-          echo "===== CLONE GOOGLE KERNEL ====="
-
-          git clone \
-            --depth=1 \
-            --branch android12-5.10-2024-05_r4 \
-            https://android.googlesource.com/kernel/common \
-            kernel_src
-
+          echo "===== CLONE GOOGLE GKI ====="
+          git clone https://android.googlesource.com/kernel/common kernel_src
           cd kernel_src
-
-          git checkout "$KERNEL_COMMIT"
-
-          ACTUAL_COMMIT=$(git rev-parse HEAD)
-
-          echo "Kernel commit: $ACTUAL_COMMIT"
-
-          if [ "$ACTUAL_COMMIT" != "$KERNEL_COMMIT" ]; then
-            echo "ERROR: Kernel commit mismatch"
-            exit 1
-          fi
-
-          cd "$GITHUB_WORKSPACE"
-
+          git checkout 7c6bbcca33e1
+          echo "===== SOURCE COMMIT ====="
+          git log --oneline -1
+          cd ..
           echo "===== DOWNLOAD AOSP CLANG ====="
-
-          mkdir -p clang
-
-          curl -L \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz" \
-            -o clang.tar.gz
-
-          tar -xf clang.tar.gz -C clang
-
+          mkdir -p clang-aosp
+          curl -L --fail --retry 3 \
+            -o clang.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          tar -xzf clang.tar.gz -C clang-aosp
           rm clang.tar.gz
-
-          chmod +x clang/bin/*
-
-          echo "===== TOOLCHAIN VERSION ====="
-
-          clang/bin/clang --version
-          clang/bin/ld.lld --version
+          echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
 
       - name: Setup ccache
-        run: |
-          set -e
-
-          mkdir -p "$HOME/.ccache"
-
-          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=4G" >> "$GITHUB_ENV"
-
-          ccache -M 4G
-          ccache -z
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: gki-5.10.209-7c6bbcca33e1-aosp-r416183b-${{ github.sha }}
+          restore-keys: |
+            gki-5.10.209-7c6bbcca33e1-aosp-r416183b-
+          max-size: 4G
 
       - name: Build Kernel
         run: |
           set -e
-
           cd "$GITHUB_WORKSPACE/kernel_src"
-
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-
           export ARCH=arm64
           export SUBARCH=arm64
-
-          export CC="ccache clang"
-          export LLVM=1
-          export LLVM_IAS=1
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-
           JOBS=2
 
-          LOCAL_VERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"
-          KERNEL_RELEASE="5.10.209${LOCAL_VERSION}"
+          echo "===== BUILD CONFIGURATION ====="
+          echo "Architecture: $ARCH"
+          echo "Build jobs: $JOBS"
 
-          echo "===== KERNEL CONFIGURATION ====="
+          echo "===== COMPILER ====="
+          clang --version
+          ld.lld --version
 
-          make O=out \
+          echo "===== CROSS COMPILER CONFIGURATION ====="
+          echo "CLANG_TRIPLE=aarch64-linux-gnu-"
+          echo "CROSS_COMPILE=aarch64-linux-gnu-"
+
+          echo "===== CCACHE BEFORE BUILD ====="
+          ccache -z
+          ccache -s
+
+          echo "===== GENERATE GKI DEFCONFIG ====="
+          make -j"$JOBS" \
+            O=out \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
             gki_defconfig
 
-          echo "===== SET CONFIG LOCALVERSION ====="
+          echo "===== SET INFINIX KERNEL LOCALVERSION ====="
+          ./scripts/config --file out/.config \
+            --set-str CONFIG_LOCALVERSION "-android12-9-00016-g7c6bbcca33e1-ab12029497"
+          ./scripts/config --file out/.config \
+            --disable CONFIG_LOCALVERSION_AUTO
 
-          ./scripts/config \
-            --file out/.config \
-            --set-str LOCALVERSION "$LOCAL_VERSION"
-
-          ./scripts/config \
-            --file out/.config \
-            --disable LOCALVERSION_AUTO
-
-          echo "===== VERIFY CONFIG LOCALVERSION ====="
-
-          grep -E 'CONFIG_LOCALVERSION=|CONFIG_LOCALVERSION_AUTO' out/.config
-
-          echo "===== OLDDEFCONFIG ====="
-
-          make O=out \
+          echo "===== UPDATE KERNEL CONFIGURATION ====="
+          make -j"$JOBS" \
+            O=out \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
             olddefconfig
 
-          echo "===== VERIFY KERNEL RELEASE ====="
-
-          ACTUAL_RELEASE=$(make -s O=out \
+          echo "===== SYNCHRONIZE GENERATED CONFIGURATION ====="
+          make \
+            O=out \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
-            kernelrelease)
+            syncconfig
 
-          echo "Expected: $KERNEL_RELEASE"
-          echo "Actual:   $ACTUAL_RELEASE"
+          echo "===== VERIFY .CONFIG ====="
+          grep -E '^CONFIG_LOCALVERSION=|^# CONFIG_LOCALVERSION_AUTO' out/.config
 
-          if [ "$ACTUAL_RELEASE" != "$KERNEL_RELEASE" ]; then
-            echo "ERROR: Kernel release mismatch"
+          echo "===== VERIFY AUTO.CONF ====="
+          grep -F 'CONFIG_LOCALVERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"' \
+            out/include/config/auto.conf
+
+          if grep -q '^CONFIG_LOCALVERSION_AUTO=y' out/include/config/auto.conf; then
+            echo "ERROR: CONFIG_LOCALVERSION_AUTO is enabled!"
             exit 1
           fi
 
-          echo "===== BUILD IMAGE AND MODULES ====="
+          echo "===== VERIFY KERNEL RELEASE ====="
+          rm -f out/include/config/kernel.release
+          KERNEL_RELEASE=$(make -s \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            kernelrelease)
 
-          make -j"$JOBS" O=out \
+          EXPECTED="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
+          echo "Expected: $EXPECTED"
+          echo "Actual:   $KERNEL_RELEASE"
+
+          if [ "$KERNEL_RELEASE" != "$EXPECTED" ]; then
+            echo "ERROR: Kernel release mismatch!"
+            exit 1
+          fi
+
+          echo "===== KERNEL RELEASE VERIFIED ====="
+
+          echo "===== START KERNEL COMPILATION ====="
+          make -j"$JOBS" \
+            O=out \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -215,93 +169,81 @@ jobs:
             CC="ccache clang" \
             Image modules
 
-          echo "===== BUILD COMPLETED ====="
+          echo "===== VERIFY BUILD OUTPUT ====="
+          test -s out/arch/arm64/boot/Image
+          test -s out/Module.symvers
+          test -s out/.config
+          test -s out/System.map
+          test -s out/vmlinux
 
+          echo "===== CCACHE AFTER BUILD ====="
           ccache -s
+
+          echo "===== BUILD COMPLETED ====="
 
       - name: Prepare Artifacts
         run: |
           set -e
-
-          cd "$GITHUB_WORKSPACE/kernel_src"
-
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          mkdir -p "$GITHUB_WORKSPACE/artifacts/modules"
-
-          echo "===== VERIFY BUILD OUTPUT ====="
-
-          for file in \
-            out/arch/arm64/boot/Image \
-            out/Module.symvers \
-            out/.config \
-            out/System.map \
-            out/vmlinux
-          do
-            if [ ! -s "$file" ]; then
-              echo "ERROR: Required file missing or empty: $file"
-              exit 1
-            fi
-
-            echo "OK: $file"
-            ls -lh "$file"
-          done
-
-          echo "===== CHECK MODULES.ORDER ====="
-
-          if [ -s out/modules.order ]; then
-            cp out/modules.order \
-              "$GITHUB_WORKSPACE/artifacts/"
-          else
-            echo "WARNING: modules.order is missing or empty."
-          fi
+          mkdir -p artifacts/modules
+          mkdir -p artifacts/kernel-info
 
           echo "===== COPY KERNEL IMAGE ====="
+          cp kernel_src/out/arch/arm64/boot/Image \
+            artifacts/Image
 
-          cp out/arch/arm64/boot/Image \
-            "$GITHUB_WORKSPACE/artifacts/Image"
+          echo "===== COPY MODULE.SYMVERS ====="
+          cp kernel_src/out/Module.symvers \
+            artifacts/kernel-info/Module.symvers
 
-          cp out/Module.symvers \
-            "$GITHUB_WORKSPACE/artifacts/Module.symvers"
+          echo "===== COPY KERNEL CONFIG ====="
+          cp kernel_src/out/.config \
+            artifacts/kernel-info/config
 
-          cp out/.config \
-            "$GITHUB_WORKSPACE/artifacts/kernel.config"
+          echo "===== COPY SYSTEM.MAP ====="
+          cp kernel_src/out/System.map \
+            artifacts/kernel-info/System.map
 
-          cp out/System.map \
-            "$GITHUB_WORKSPACE/artifacts/System.map"
-
-          cp out/vmlinux \
-            "$GITHUB_WORKSPACE/artifacts/vmlinux"
+          echo "===== COPY VMLINUX ====="
+          cp kernel_src/out/vmlinux \
+            artifacts/kernel-info/vmlinux
 
           echo "===== COPY KERNEL MODULES ====="
+          cd kernel_src/out
+          find . -type f -name '*.ko' -print0 |
+          while IFS= read -r -d '' module; do
+            mkdir -p "$GITHUB_WORKSPACE/artifacts/modules/$(dirname "$module")"
+            cp "$module" \
+              "$GITHUB_WORKSPACE/artifacts/modules/$module"
+          done
 
-          find out -type f -name '*.ko' -print
+          cd "$GITHUB_WORKSPACE"
 
-          find out -type f -name '*.ko' \
-            -exec cp --parents {} \
-            "$GITHUB_WORKSPACE/artifacts/modules/" \;
+          echo "===== VERIFY ARTIFACTS ====="
+          test -s artifacts/Image
+          test -s artifacts/kernel-info/Module.symvers
+          test -s artifacts/kernel-info/config
+          test -s artifacts/kernel-info/System.map
+          test -s artifacts/kernel-info/vmlinux
 
-          echo "===== SAVE KERNEL RELEASE ====="
+          echo "===== MODULE.SYMVERS PREVIEW ====="
+          head -n 10 artifacts/kernel-info/Module.symvers
 
-          make -s O=out \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            kernelrelease \
-            > "$GITHUB_WORKSPACE/artifacts/kernelrelease.txt"
+          echo "===== KERNEL LOCALVERSION ====="
+          grep -E '^CONFIG_LOCALVERSION=|^# CONFIG_LOCALVERSION_AUTO' \
+            artifacts/kernel-info/config
 
           echo "===== ARTIFACT CONTENTS ====="
+          ls -lh artifacts/
 
-          find "$GITHUB_WORKSPACE/artifacts" -type f -print
+          echo "===== KERNEL INFO ====="
+          ls -lh artifacts/kernel-info/
 
-          echo "===== ARTIFACT PREPARATION COMPLETED ====="
+          echo "===== MODULE COUNT ====="
+          find artifacts/modules -type f -name '*.ko' | wc -l
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: X6833B-GKI-5.10.209-Baseline
+          name: Google-GKI-5.10.209-X6833B-Baseline
           path: artifacts/
-          if-no-files-found: error
-          compression-level: 6
           retention-days: 14
