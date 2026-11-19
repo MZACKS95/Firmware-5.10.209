@@ -45,12 +45,13 @@ jobs:
           set -e
 
           echo "===== CHECK EXISTING SWAP ====="
-
           free -h
           swapon --show
 
           if swapon --show=NAME --noheadings | grep -qx '/swapfile'; then
             echo "/swapfile is already active."
+          elif swapon --show --noheadings | grep -q .; then
+            echo "Existing swap detected. No additional swap needed."
           else
             if [ -e /swapfile ]; then
               sudo rm -f /swapfile
@@ -63,7 +64,6 @@ jobs:
           fi
 
           echo "===== SWAP STATUS ====="
-
           free -h
           swapon --show
 
@@ -71,7 +71,7 @@ jobs:
         run: |
           set -e
 
-          export KERNEL_COMMIT="7c6bbcca33e1734642601acf07a14140116fa956"
+          KERNEL_COMMIT="7c6bbcca33e1734642601acf07a14140116fa956"
 
           echo "===== CLONE GOOGLE KERNEL ====="
 
@@ -146,7 +146,8 @@ jobs:
 
           JOBS=2
 
-          KERNEL_RELEASE="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
+          LOCAL_VERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"
+          KERNEL_RELEASE="5.10.209${LOCAL_VERSION}"
 
           echo "===== KERNEL CONFIGURATION ====="
 
@@ -159,15 +160,19 @@ jobs:
             CC="ccache clang" \
             gki_defconfig
 
-          echo "===== SET LOCALVERSION ====="
+          echo "===== SET CONFIG LOCALVERSION ====="
 
           ./scripts/config \
             --file out/.config \
-            --set-str LOCALVERSION "-android12-9-00016-g7c6bbcca33e1-ab12029497"
+            --set-str LOCALVERSION "$LOCAL_VERSION"
 
           ./scripts/config \
             --file out/.config \
             --disable LOCALVERSION_AUTO
+
+          echo "===== VERIFY CONFIG LOCALVERSION ====="
+
+          grep -E 'CONFIG_LOCALVERSION=|CONFIG_LOCALVERSION_AUTO' out/.config
 
           echo "===== OLDDEFCONFIG ====="
 
@@ -178,6 +183,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache clang" \
+            LOCALVERSION="$LOCAL_VERSION" \
             olddefconfig
 
           echo "===== VERIFY KERNEL RELEASE ====="
@@ -189,6 +195,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache clang" \
+            LOCALVERSION="$LOCAL_VERSION" \
             kernelrelease)
 
           echo "Expected: $KERNEL_RELEASE"
@@ -208,6 +215,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache clang" \
+            LOCALVERSION="$LOCAL_VERSION" \
             Image modules
 
           echo "===== BUILD COMPLETED ====="
@@ -219,6 +227,8 @@ jobs:
           set -e
 
           cd "$GITHUB_WORKSPACE/kernel_src"
+
+          LOCAL_VERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"
 
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
           mkdir -p "$GITHUB_WORKSPACE/artifacts/modules"
@@ -244,13 +254,10 @@ jobs:
           echo "===== CHECK MODULES.ORDER ====="
 
           if [ -s out/modules.order ]; then
-            echo "FOUND: out/modules.order"
-
             cp out/modules.order \
               "$GITHUB_WORKSPACE/artifacts/"
           else
             echo "WARNING: modules.order is missing or empty."
-            echo "Continuing without modules.order."
           fi
 
           echo "===== COPY KERNEL IMAGE ====="
@@ -286,7 +293,7 @@ jobs:
             LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
+            LOCALVERSION="$LOCAL_VERSION" \
             kernelrelease \
             > "$GITHUB_WORKSPACE/artifacts/kernelrelease.txt"
 
