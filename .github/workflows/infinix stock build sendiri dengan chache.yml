@@ -1,4 +1,4 @@
-name: Build infinix stock-android
+name: Build infinix stock
 
 on:
   workflow_dispatch:
@@ -264,13 +264,11 @@ jobs:
           ls -lh out/Module.symvers
           ls -lh out/.config
           ls -lh out/System.map
-          ls -lh out/vmlinux
 
           test -s out/arch/arm64/boot/Image
           test -s out/Module.symvers
           test -s out/.config
           test -s out/System.map
-          test -s out/vmlinux
 
           echo "===== CCACHE AFTER BUILD ====="
           ccache -s
@@ -304,10 +302,6 @@ jobs:
           cp kernel_src/out/System.map \
             artifacts/kernel-info/System.map
 
-          echo "===== COPY VMLINUX ====="
-          cp kernel_src/out/vmlinux \
-            artifacts/kernel-info/vmlinux
-
           echo "===== COPY KERNEL MODULES ====="
           cd kernel_src/out
 
@@ -326,7 +320,6 @@ jobs:
           test -s artifacts/kernel-info/Module.symvers
           test -s artifacts/kernel-info/config
           test -s artifacts/kernel-info/System.map
-          test -s artifacts/kernel-info/vmlinux
 
           echo "===== MODULE.SYMVERS PREVIEW ====="
           head -n 10 artifacts/kernel-info/Module.symvers
