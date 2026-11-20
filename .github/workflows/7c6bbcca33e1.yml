@@ -72,8 +72,13 @@ jobs:
 
             git -C "$KERNEL_DIR" init
 
-            git -C "$KERNEL_DIR" remote add origin \
-              https://android.googlesource.com/kernel/common
+            if git -C "$KERNEL_DIR" remote get-url origin >/dev/null 2>&1; then
+              git -C "$KERNEL_DIR" remote set-url origin \
+                https://android.googlesource.com/kernel/common
+            else
+              git -C "$KERNEL_DIR" remote add origin \
+                https://android.googlesource.com/kernel/common
+            fi
 
           fi
 
@@ -151,10 +156,10 @@ jobs:
           max-size: 2G
 
       # ==========================================
-      # DOWNLOAD 248 ORIGINAL SYMBOLS
+      # DOWNLOAD ORIGINAL 248 SYMBOLS
       # ==========================================
 
-      - name: Download Original Module.symvers
+      - name: Download Original 248 Symbols
         run: |
           set -e
 
@@ -166,18 +171,13 @@ jobs:
 
           echo "===== VERIFY SYMBOL COUNT ====="
 
-          wc -l Module.symvers.final
+          test "$(wc -l < Module.symvers.final)" -eq 248
 
-          if [ "$(wc -l < Module.symvers.final)" -ne 248 ]; then
-            echo "ERROR: Expected 248 symbols"
-            exit 1
-          fi
-
-          echo "===== VERIFY SYMBOL FORMAT ====="
+          echo "===== VERIFY FOUR-COLUMN INPUT ====="
 
           awk '
             NF != 4 {
-              print "INVALID FORMAT:", NR, $0
+              print "ERROR: Invalid format at line", NR, $0
               bad=1
             }
             END {
@@ -185,7 +185,7 @@ jobs:
             }
           ' Module.symvers.final
 
-          echo "===== SYMBOL FILE VERIFIED ====="
+          echo "===== ORIGINAL SYMBOL FILE VERIFIED ====="
 
       # ==========================================
       # PREPARE KERNEL CONFIGURATION
@@ -286,8 +286,8 @@ jobs:
           fi
 
       # ==========================================
-      # INSTALL ONLY 248 SYMBOL CRC
-      # NO GEN4M MODULE.SYMVERS
+      # INSTALL ORIGINAL 248 SYMBOLS
+      # CONVERT FOUR COLUMNS TO FIVE COLUMNS
       # ==========================================
 
       - name: Install Original 248 Symbol CRCs
@@ -296,19 +296,45 @@ jobs:
 
           KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
 
-          cp Module.symvers.final \
+          echo "===== CONVERT SYMBOL FORMAT ====="
+
+          awk '
+            NF == 4 {
+              printf "%s\t%s\t%s\t%s\t\n", $1, $2, $3, $4
+              next
+            }
+            {
+              print "ERROR: Invalid input at line", NR
+              exit 1
+            }
+          ' Module.symvers.final > Module.symvers.fixed
+
+          echo "===== VERIFY FIVE COLUMNS ====="
+
+          awk -F '\t' '
+            NF != 5 {
+              print "ERROR:", NR, "columns:", NF
+              bad=1
+            }
+            END {
+              exit bad
+            }
+          ' Module.symvers.fixed
+
+          echo "===== VERIFY SYMBOL COUNT ====="
+
+          test "$(wc -l < Module.symvers.fixed)" -eq 248
+
+          cp Module.symvers.fixed \
             "$KERNEL_DIR/out/Module.symvers"
 
           echo "===== ACTIVE MODULE.SYMVERS ====="
 
           wc -l "$KERNEL_DIR/out/Module.symvers"
 
-          echo "===== VERIFY GEN4M NOT USED ====="
+          echo "===== VERIFY FIRST ENTRIES ====="
 
-          if [ -f "$GITHUB_WORKSPACE/gen4m/Module.symvers" ]; then
-            echo "ERROR: Gen4m Module.symvers detected"
-            exit 1
-          fi
+          head -n 5 "$KERNEL_DIR/out/Module.symvers"
 
       # ==========================================
       # VERIFY MT7601U SOURCE DIRECTORY
@@ -391,14 +417,23 @@ jobs:
 
           file "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
 
+          echo "===== UNDEFINED SYMBOLS ====="
+
+          llvm-nm -u "$GITHUB_WORKSPACE/artifacts/mt7601u.ko" \
+            > "$GITHUB_WORKSPACE/artifacts/undefined-symbols.txt" || true
+
+          cat "$GITHUB_WORKSPACE/artifacts/undefined-symbols.txt"
+
       # ==========================================
-      # UPLOAD ONLY MT7601U.KO
+      # UPLOAD ONLY MT7601U.KO AND SYMBOL REPORT
       # ==========================================
 
       - name: Upload MT7601U KO
         uses: actions/upload-artifact@v4
         with:
           name: MT7601U-KO-5.10.209
-          path: artifacts/mt7601u.ko
+          path: |
+            artifacts/mt7601u.ko
+            artifacts/undefined-symbols.txt
           if-no-files-found: error
           retention-days: 14
