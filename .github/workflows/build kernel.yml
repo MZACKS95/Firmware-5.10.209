@@ -1,4 +1,4 @@
-name: Build infinix stock google
+name: Build infinix X6833B stock google
 
 on:
   workflow_dispatch:
