@@ -1,4 +1,5 @@
-name: Build infinix stock
+
+name: Build MT7601U KO Only
 
 on:
   workflow_dispatch:
@@ -7,88 +8,205 @@ permissions:
   contents: read
 
 jobs:
-  build-kernel:
+  build-mt7601u:
     runs-on: ubuntu-22.04
 
     steps:
+      # ==========================================
+      # CHECKOUT WORKFLOW
+      # ==========================================
+
       - name: Checkout Workflow
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # ==========================================
+      # DEPENDENCIES
+      # ==========================================
+
       - name: Install Dependencies
         run: |
           set -e
+
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache cpio \
-            curl flex git libelf-dev libssl-dev \
+            bc bison build-essential \
+            ccache curl flex git \
+            libelf-dev libssl-dev \
             lz4 pahole python3 rsync
 
-      - name: Setup 8GB Swap Space
-        run: |
-          set -e
-          echo "===== SETUP SWAP ====="
-          sudo fallocate -l 8G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          echo "===== MEMORY STATUS ====="
-          free -h
-          swapon --show
+      # ==========================================
+      # GOOGLE KERNEL SOURCE
+      # ==========================================
 
-      - name: Clone Kernel and Clang
+      - name: Cache Google Kernel Git Database
+        id: kernel-cache
+        uses: actions/cache@v4
+        with:
+          path: android/kernel/common/7c6bbcca33e1/.git
+          key: gki-source-7c6bbcca33e1
+
+      - name: Checkout Google Kernel Source
         run: |
           set -e
-          echo "===== CLONE GOOGLE GKI ====="
-          git clone https://android.googlesource.com/kernel/common kernel_src
-          cd kernel_src
-          git checkout 7c6bbcca33e1
-          echo "===== SOURCE COMMIT ====="
-          git log --oneline -1
-          cd ..
-          echo "===== DOWNLOAD AOSP CLANG ====="
+
+          KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
+
+          mkdir -p "$(dirname "$KERNEL_DIR")"
+
+          if [ "${{ steps.kernel-cache.outputs.cache-hit }}" != "true" ]; then
+
+            echo "===== CLONE GOOGLE KERNEL ====="
+
+            git clone \
+              https://android.googlesource.com/kernel/common \
+              "$KERNEL_DIR"
+
+          else
+
+            echo "===== REUSE KERNEL GIT CACHE ====="
+
+            mkdir -p "$KERNEL_DIR"
+
+            git -C "$KERNEL_DIR" init
+
+            git -C "$KERNEL_DIR" remote add origin \
+              https://android.googlesource.com/kernel/common
+
+          fi
+
+          cd "$KERNEL_DIR"
+
+          if ! git cat-file -e 7c6bbcca33e1^{commit} 2>/dev/null; then
+            git fetch --depth=1 origin 7c6bbcca33e1
+          fi
+
+          git checkout --detach 7c6bbcca33e1
+
+          echo "===== VERIFY SOURCE COMMIT ====="
+
+          git log -1 --oneline
+
+          ACTUAL=$(git rev-parse HEAD)
+
+          if [ "${ACTUAL:0:12}" != "7c6bbcca33e1" ]; then
+            echo "ERROR: Kernel commit mismatch"
+            exit 1
+          fi
+
+      # ==========================================
+      # AOSP CLANG
+      # ==========================================
+
+      - name: Cache AOSP Clang
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: clang-aosp
+          key: aosp-clang-r416183b-android12
+
+      - name: Download AOSP Clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+
           mkdir -p clang-aosp
+
           curl -L --fail --retry 3 \
             -o clang.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+
           tar -xzf clang.tar.gz -C clang-aosp
+
           rm clang.tar.gz
+
+      - name: Setup AOSP Clang PATH
+        run: |
+          set -e
+
           echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
+
+          export PATH="$GITHUB_WORKSPACE/clang-aosp/bin:$PATH"
+
+          echo "===== VERIFY CLANG ====="
+          command -v clang
+          clang --version
+
+          echo "===== VERIFY LLD ====="
+          command -v ld.lld
+          ld.lld --version
+
+      # ==========================================
+      # CCACHE
+      # ==========================================
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: gki-5.10.209-7c6bbcca33e1-aosp-r416183b-${{ github.sha }}
+          key: mt7601u-5.10.209-7c6bbcca33e1
           restore-keys: |
-            gki-5.10.209-7c6bbcca33e1-aosp-r416183b-
-          max-size: 4G
+            mt7601u-5.10.209-7c6bbcca33e1
+          max-size: 2G
 
-      - name: Build Kernel
+      # ==========================================
+      # DOWNLOAD 248 ORIGINAL SYMBOLS
+      # ==========================================
+
+      - name: Download Original Module.symvers
         run: |
           set -e
-          cd "$GITHUB_WORKSPACE/kernel_src"
+
+          echo "===== DOWNLOAD MODULE.SYMVERS.FINAL ====="
+
+          curl -L --fail --retry 3 \
+            -o Module.symvers.final \
+            "https://raw.githubusercontent.com/MZACKS95/Firmware-5.10.209/main/config/Module.symvers.final"
+
+          echo "===== VERIFY SYMBOL COUNT ====="
+
+          wc -l Module.symvers.final
+
+          if [ "$(wc -l < Module.symvers.final)" -ne 248 ]; then
+            echo "ERROR: Expected 248 symbols"
+            exit 1
+          fi
+
+          echo "===== VERIFY SYMBOL FORMAT ====="
+
+          awk '
+            NF != 4 {
+              print "INVALID FORMAT:", NR, $0
+              bad=1
+            }
+            END {
+              exit bad
+            }
+          ' Module.symvers.final
+
+          echo "===== SYMBOL FILE VERIFIED ====="
+
+      # ==========================================
+      # PREPARE KERNEL CONFIGURATION
+      # NO IMAGE BUILD
+      # ==========================================
+
+      - name: Prepare Kernel Headers
+        run: |
+          set -e
+
+          KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
+
+          cd "$KERNEL_DIR"
+
           export ARCH=arm64
           export SUBARCH=arm64
+
           JOBS=2
 
-          echo "===== BUILD CONFIGURATION ====="
-          echo "Architecture: $ARCH"
-          echo "Build jobs: $JOBS"
-
-          echo "===== COMPILER ====="
-          clang --version
-          ld.lld --version
-
-          echo "===== CROSS COMPILER CONFIGURATION ====="
-          echo "CLANG_TRIPLE=aarch64-linux-gnu-"
-          echo "CROSS_COMPILE=aarch64-linux-gnu-"
-
-          echo "===== CCACHE BEFORE BUILD ====="
-          ccache -z
-          ccache -s
-
           echo "===== GENERATE GKI DEFCONFIG ====="
+
           make -j"$JOBS" \
             O=out \
             ARCH=arm64 \
@@ -98,13 +216,30 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             gki_defconfig
 
-          echo "===== SET INFINIX KERNEL LOCALVERSION ====="
+          echo "===== CONFIGURE MODULE SUPPORT ====="
+
           ./scripts/config --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-android12-9-00016-g7c6bbcca33e1-ab12029497"
+            --enable CONFIG_MODULES \
+            --enable CONFIG_MODVERSIONS \
+            --enable CONFIG_USB \
+            --enable CONFIG_WIRELESS \
+            --enable CONFIG_WLAN \
+            --enable CONFIG_WLAN_VENDOR_MEDIATEK \
+            --module CONFIG_CFG80211 \
+            --module CONFIG_MAC80211 \
+            --module CONFIG_MT7601U
+
+          echo "===== SET INFINIX KERNEL LOCALVERSION ====="
+
+          ./scripts/config --file out/.config \
+            --set-str CONFIG_LOCALVERSION \
+            "-android12-9-00016-g7c6bbcca33e1-ab12029497"
+
           ./scripts/config --file out/.config \
             --disable CONFIG_LOCALVERSION_AUTO
 
-          echo "===== UPDATE KERNEL CONFIGURATION ====="
+          echo "===== UPDATE CONFIGURATION ====="
+
           make -j"$JOBS" \
             O=out \
             ARCH=arm64 \
@@ -114,51 +249,19 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-          echo "===== SYNCHRONIZE GENERATED CONFIGURATION ====="
-          make \
-            O=out \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            syncconfig
+          echo "===== VERIFY REQUIRED CONFIG ====="
 
-          echo "===== VERIFY .CONFIG ====="
-          grep -E '^CONFIG_LOCALVERSION=|^# CONFIG_LOCALVERSION_AUTO' out/.config
+          grep -E \
+            'CONFIG_MODULES=|CONFIG_MODVERSIONS=|CONFIG_USB=|CONFIG_WIRELESS=|CONFIG_WLAN=|CONFIG_WLAN_VENDOR_MEDIATEK=|CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=' \
+            out/.config
 
-          echo "===== VERIFY AUTO.CONF ====="
-          grep -F 'CONFIG_LOCALVERSION="-android12-9-00016-g7c6bbcca33e1-ab12029497"' \
-            out/include/config/auto.conf
+          echo "===== VERIFY MT7601U CONFIG ====="
 
-          if grep -q '^CONFIG_LOCALVERSION_AUTO=y' out/include/config/auto.conf; then
-            echo "ERROR: CONFIG_LOCALVERSION_AUTO is enabled!"
-            exit 1
-          fi
+          grep -q '^CONFIG_WLAN_VENDOR_MEDIATEK=y$' out/.config
+          grep -q '^CONFIG_MT7601U=m$' out/.config
 
-          echo "===== VERIFY KERNEL RELEASE ====="
-          rm -f out/include/config/kernel.release
-          KERNEL_RELEASE=$(make -s \
-            O=out \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            kernelrelease)
+          echo "===== PREPARE KERNEL HEADERS ====="
 
-          EXPECTED="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
-          echo "Expected: $EXPECTED"
-          echo "Actual:   $KERNEL_RELEASE"
-
-          if [ "$KERNEL_RELEASE" != "$EXPECTED" ]; then
-            echo "ERROR: Kernel release mismatch!"
-            exit 1
-          fi
-
-          echo "===== KERNEL RELEASE VERIFIED ====="
-
-          echo "===== START KERNEL COMPILATION ====="
           make -j"$JOBS" \
             O=out \
             ARCH=arm64 \
@@ -166,84 +269,136 @@ jobs:
             LLVM_IAS=1 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
-            Image modules
+            modules_prepare
 
-          echo "===== VERIFY BUILD OUTPUT ====="
-          test -s out/arch/arm64/boot/Image
-          test -s out/Module.symvers
-          test -s out/.config
-          test -s out/System.map
-          test -s out/vmlinux
+          echo "===== VERIFY KERNEL RELEASE ====="
 
-          echo "===== CCACHE AFTER BUILD ====="
-          ccache -s
+          KERNEL_RELEASE=$(cat out/include/config/kernel.release)
 
-          echo "===== BUILD COMPLETED ====="
+          EXPECTED="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
 
-      - name: Prepare Artifacts
+          echo "Expected: $EXPECTED"
+          echo "Actual:   $KERNEL_RELEASE"
+
+          if [ "$KERNEL_RELEASE" != "$EXPECTED" ]; then
+            echo "ERROR: Kernel release mismatch"
+            exit 1
+          fi
+
+      # ==========================================
+      # INSTALL ONLY 248 SYMBOL CRC
+      # NO GEN4M MODULE.SYMVERS
+      # ==========================================
+
+      - name: Install Original 248 Symbol CRCs
         run: |
           set -e
-          mkdir -p artifacts/modules
-          mkdir -p artifacts/kernel-info
 
-          echo "===== COPY KERNEL IMAGE ====="
-          cp kernel_src/out/arch/arm64/boot/Image \
-            artifacts/Image
+          KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
 
-          echo "===== COPY MODULE.SYMVERS ====="
-          cp kernel_src/out/Module.symvers \
-            artifacts/kernel-info/Module.symvers
+          cp Module.symvers.final \
+            "$KERNEL_DIR/out/Module.symvers"
 
-          echo "===== COPY KERNEL CONFIG ====="
-          cp kernel_src/out/.config \
-            artifacts/kernel-info/config
+          echo "===== ACTIVE MODULE.SYMVERS ====="
 
-          echo "===== COPY SYSTEM.MAP ====="
-          cp kernel_src/out/System.map \
-            artifacts/kernel-info/System.map
+          wc -l "$KERNEL_DIR/out/Module.symvers"
 
-          echo "===== COPY VMLINUX ====="
-          cp kernel_src/out/vmlinux \
-            artifacts/kernel-info/vmlinux
+          echo "===== VERIFY GEN4M NOT USED ====="
 
-          echo "===== COPY KERNEL MODULES ====="
-          cd kernel_src/out
-          find . -type f -name '*.ko' -print0 |
-          while IFS= read -r -d '' module; do
-            mkdir -p "$GITHUB_WORKSPACE/artifacts/modules/$(dirname "$module")"
-            cp "$module" \
-              "$GITHUB_WORKSPACE/artifacts/modules/$module"
-          done
+          if [ -f "$GITHUB_WORKSPACE/gen4m/Module.symvers" ]; then
+            echo "ERROR: Gen4m Module.symvers detected"
+            exit 1
+          fi
 
-          cd "$GITHUB_WORKSPACE"
+      # ==========================================
+      # VERIFY MT7601U SOURCE DIRECTORY
+      # ==========================================
 
-          echo "===== VERIFY ARTIFACTS ====="
-          test -s artifacts/Image
-          test -s artifacts/kernel-info/Module.symvers
-          test -s artifacts/kernel-info/config
-          test -s artifacts/kernel-info/System.map
-          test -s artifacts/kernel-info/vmlinux
+      - name: Verify MT7601U Source
+        run: |
+          set -e
 
-          echo "===== MODULE.SYMVERS PREVIEW ====="
-          head -n 10 artifacts/kernel-info/Module.symvers
+          DRIVER_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1/drivers/net/wireless/mediatek/mt7601u"
 
-          echo "===== KERNEL LOCALVERSION ====="
-          grep -E '^CONFIG_LOCALVERSION=|^# CONFIG_LOCALVERSION_AUTO' \
-            artifacts/kernel-info/config
+          echo "===== DRIVER DIRECTORY ====="
 
-          echo "===== ARTIFACT CONTENTS ====="
-          ls -lh artifacts/
+          echo "$DRIVER_DIR"
 
-          echo "===== KERNEL INFO ====="
-          ls -lh artifacts/kernel-info/
+          test -d "$DRIVER_DIR"
+          test -f "$DRIVER_DIR/Makefile"
+          test -f "$DRIVER_DIR/Kconfig"
 
-          echo "===== MODULE COUNT ====="
-          find artifacts/modules -type f -name '*.ko' | wc -l
+          echo "===== DRIVER MAKEFILE ====="
 
-      - name: Upload Artifacts
+          cat "$DRIVER_DIR/Makefile"
+
+          echo "===== DRIVER SOURCE FILES ====="
+
+          ls -lh "$DRIVER_DIR"
+
+      # ==========================================
+      # BUILD ONLY MT7601U.KO
+      # ==========================================
+
+      - name: Build MT7601U Only
+        run: |
+          set -e
+
+          KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
+
+          DRIVER_DIR="$KERNEL_DIR/drivers/net/wireless/mediatek/mt7601u"
+
+          cd "$KERNEL_DIR"
+
+          export ARCH=arm64
+          export SUBARCH=arm64
+
+          export PATH="$GITHUB_WORKSPACE/clang-aosp/bin:$PATH"
+
+          export CC="ccache clang"
+
+          echo "===== BUILD MT7601U.KO ====="
+
+          make -j2 \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            KBUILD_MODPOST_WARN=1 \
+            M="$DRIVER_DIR" \
+            modules
+
+          echo "===== LOCATE MT7601U.KO ====="
+
+          KO=$(find "$DRIVER_DIR" "$KERNEL_DIR/out" \
+            -type f -name 'mt7601u.ko' -print -quit)
+
+          if [ -z "$KO" ]; then
+            echo "ERROR: mt7601u.ko was not generated"
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+
+          cp "$KO" \
+            "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
+
+          echo "===== VERIFY OUTPUT ====="
+
+          ls -lh "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
+
+          file "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
+
+      # ==========================================
+      # UPLOAD ONLY MT7601U.KO
+      # ==========================================
+
+      - name: Upload MT7601U KO
         uses: actions/upload-artifact@v4
         with:
-          name: Google-GKI-5.10.209-X6833B-Baseline
-          path: artifacts/
+          name: MT7601U-KO-5.10.209
+          path: artifacts/mt7601u.ko
+          if-no-files-found: error
           retention-days: 14
