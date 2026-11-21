@@ -59,6 +59,20 @@ jobs:
           ls -lh arch/arm64/configs/gki_defconfig || echo "WARNING: gki_defconfig tidak ada, akan pakai fallback defconfig"
           ls arch/arm64/configs/ | head -n 50
 
+      - name: Check + Apply NetHunter Injection Patch
+        run: |
+          set -e
+          KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
+          PATCH="$GITHUB_WORKSPACE/.github/workflows/add-wifi-injection-5.10.patch"
+          cd "$KERNEL_DIR"
+          echo "===== CHECK PATCH ====="
+          git apply --check --verbose "$PATCH"
+          echo "===== CHECK LOLOS, APPLY BENERAN ====="
+          git apply --verbose "$PATCH"
+          echo "===== FILE YANG KE-PATCH ====="
+          git diff --stat
+          git diff --name-only
+
       - name: Cache AOSP Clang
         id: clang-cache
         uses: actions/cache@v4
