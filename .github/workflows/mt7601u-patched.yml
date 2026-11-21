@@ -1,4 +1,4 @@
-name: Build MT7601U-patched
+name: Build MT7601U KO Only
 
 on:
   workflow_dispatch:
@@ -11,18 +11,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # ==========================================
-      # CHECKOUT WORKFLOW
-      # ==========================================
-
       - name: Checkout Workflow
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      # ==========================================
-      # DEPENDENCIES
-      # ==========================================
 
       - name: Install Dependencies
         run: |
@@ -33,10 +25,6 @@ jobs:
             ccache curl flex git \
             libelf-dev libssl-dev \
             lz4 pahole python3 rsync
-
-      # ==========================================
-      # GOOGLE KERNEL SOURCE - CACHE DIBENERIN
-      # ==========================================
 
       - name: Cache Google Kernel Source
         id: kernel-cache
@@ -55,7 +43,6 @@ jobs:
             git clone https://android.googlesource.com/kernel/common "$KERNEL_DIR"
           else
             echo "===== CACHE HIT - RESTORE FROM CACHE ====="
-            ls -lh "$KERNEL_DIR/arch/arm64/configs/gki_defconfig" || echo "CACHE CHECK: gki_defconfig belum ada, akan di-restore via checkout"
           fi
           cd "$KERNEL_DIR"
           git checkout --detach 7c6bbcca33e1
@@ -71,10 +58,6 @@ jobs:
           echo "===== VERIFY GKI_DEFCONFIG ====="
           ls -lh arch/arm64/configs/gki_defconfig || echo "WARNING: gki_defconfig tidak ada, akan pakai fallback defconfig"
           ls arch/arm64/configs/ | head -n 50
-
-      # ==========================================
-      # AOSP CLANG
-      # ==========================================
 
       - name: Cache AOSP Clang
         id: clang-cache
@@ -99,16 +82,10 @@ jobs:
           set -e
           echo "$GITHUB_WORKSPACE/clang-aosp/bin" >> "$GITHUB_PATH"
           export PATH="$GITHUB_WORKSPACE/clang-aosp/bin:$PATH"
-          echo "===== VERIFY CLANG ====="
           command -v clang
           clang --version
-          echo "===== VERIFY LLD ====="
           command -v ld.lld
           ld.lld --version
-
-      # ==========================================
-      # CCACHE
-      # ==========================================
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -118,20 +95,13 @@ jobs:
             mt7601u-5.10.209-7c6bbcca33e1
           max-size: 2G
 
-      # ==========================================
-      # DOWNLOAD ORIGINAL 248 SYMBOLS
-      # ==========================================
-
       - name: Download Original 248 Symbols
         run: |
           set -e
-          echo "===== DOWNLOAD MODULE.SYMVERS.FINAL ====="
           curl -L --fail --retry 3 \
             -o Module.symvers.final \
             "https://raw.githubusercontent.com/MZACKS95/Firmware-5.10.209/main/config/Module.symvers.final"
-          echo "===== VERIFY SYMBOL COUNT ====="
           test "$(wc -l < Module.symvers.final)" -eq 248
-          echo "===== VERIFY FOUR-COLUMN INPUT ====="
           awk '
             NF != 4 {
               print "ERROR: Invalid format at line", NR, $0
@@ -141,11 +111,6 @@ jobs:
               exit bad
             }
           ' Module.symvers.final
-          echo "===== ORIGINAL SYMBOL FILE VERIFIED ====="
-
-      # ==========================================
-      # PREPARE KERNEL CONFIGURATION
-      # ==========================================
 
       - name: Prepare Kernel Headers
         run: |
@@ -155,7 +120,6 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           JOBS=2
-          echo "===== GENERATE DEFCONFIG ====="
           if [ -f "arch/arm64/configs/gki_defconfig" ]; then
             echo "USING gki_defconfig"
             make -j"$JOBS" O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
@@ -163,7 +127,6 @@ jobs:
             echo "GKI NOT FOUND, FALLBACK TO defconfig"
             make -j"$JOBS" O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- defconfig
           fi
-          echo "===== CONFIGURE MODULE SUPPORT ====="
           ./scripts/config --file out/.config \
             --enable CONFIG_MODULES \
             --enable CONFIG_MODVERSIONS \
@@ -174,22 +137,16 @@ jobs:
             --module CONFIG_CFG80211 \
             --module CONFIG_MAC80211 \
             --module CONFIG_MT7601U
-          echo "===== SET INFINIX KERNEL LOCALVERSION ====="
           ./scripts/config --file out/.config \
             --set-str CONFIG_LOCALVERSION \
             "-android12-9-00016-g7c6bbcca33e1-ab12029497"
           ./scripts/config --file out/.config \
             --disable CONFIG_LOCALVERSION_AUTO
-          echo "===== UPDATE CONFIGURATION ====="
           make -j"$JOBS" O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-          echo "===== VERIFY REQUIRED CONFIG ====="
           grep -E 'CONFIG_MODULES=|CONFIG_MODVERSIONS=|CONFIG_USB=|CONFIG_WIRELESS=|CONFIG_WLAN=|CONFIG_WLAN_VENDOR_MEDIATEK=|CONFIG_CFG80211=|CONFIG_MAC80211=|CONFIG_MT7601U=' out/.config
-          echo "===== VERIFY MT7601U CONFIG ====="
           grep -q '^CONFIG_WLAN_VENDOR_MEDIATEK=y$' out/.config
           grep -q '^CONFIG_MT7601U=m$' out/.config
-          echo "===== PREPARE KERNEL HEADERS ====="
           make -j"$JOBS" O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
-          echo "===== VERIFY KERNEL RELEASE ====="
           KERNEL_RELEASE=$(cat out/include/config/kernel.release)
           EXPECTED="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
           echo "Expected: $EXPECTED"
@@ -199,15 +156,10 @@ jobs:
             exit 1
           fi
 
-      # ==========================================
-      # INSTALL ORIGINAL 248 SYMBOLS
-      # ==========================================
-
       - name: Install Original 248 Symbol CRCs
         run: |
           set -e
           KERNEL_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1"
-          echo "===== CONVERT SYMBOL FORMAT ====="
           awk '
             NF == 4 {
               printf "%s\t%s\t%s\t%s\t\n", $1, $2, $3, $4
@@ -218,7 +170,6 @@ jobs:
               exit 1
             }
           ' Module.symvers.final > Module.symvers.fixed
-          echo "===== VERIFY FIVE COLUMNS ====="
           awk -F '\t' '
             NF != 5 {
               print "ERROR:", NR, "columns:", NF
@@ -228,44 +179,30 @@ jobs:
               exit bad
             }
           ' Module.symvers.fixed
-          echo "===== VERIFY SYMBOL COUNT ====="
           test "$(wc -l < Module.symvers.fixed)" -eq 248
           cp Module.symvers.fixed "$KERNEL_DIR/out/Module.symvers"
-          echo "===== ACTIVE MODULE.SYMVERS ====="
           wc -l "$KERNEL_DIR/out/Module.symvers"
-          echo "===== VERIFY FIRST ENTRIES ====="
           head -n 5 "$KERNEL_DIR/out/Module.symvers"
-
-      # ==========================================
-      # VERIFY MT7601U SOURCE DIRECTORY
-      # ==========================================
 
       - name: Verify MT7601U Source
         run: |
           set -e
           DRIVER_DIR="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1/drivers/net/wireless/mediatek/mt7601u"
-          echo "===== DRIVER DIRECTORY ====="
-          echo "$DRIVER_DIR"
           test -d "$DRIVER_DIR"
           test -f "$DRIVER_DIR/Makefile"
           test -f "$DRIVER_DIR/Kconfig"
-          echo "===== DRIVER MAKEFILE ====="
           cat "$DRIVER_DIR/Makefile"
-          echo "===== DRIVER SOURCE FILES ====="
           ls -lh "$DRIVER_DIR"
-
-      # ==========================================
-      # PATCH MT7601U GET_CHANNEL
-      # ==========================================
 
       - name: Patch MT7601U get_channel
         run: |
           set -e
           MAIN_C="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1/drivers/net/wireless/mediatek/mt7601u/main.c"
+          export MAIN_C
           cp "$MAIN_C" "$MAIN_C.bak"
           python3 - <<'PY'
-          import pathlib
-          p = pathlib.Path("$MAIN_C")
+          import pathlib, os
+          p = pathlib.Path(os.environ["MAIN_C"])
           t = p.read_text()
           if ".get_channel" not in t:
               func = """
@@ -288,10 +225,6 @@ jobs:
           PY
           grep -n -A2 -B2 "get_channel" "$MAIN_C"
 
-      # ==========================================
-      # BUILD ONLY MT7601U.KO
-      # ==========================================
-
       - name: Build MT7601U Only
         run: |
           set -e
@@ -302,9 +235,7 @@ jobs:
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang-aosp/bin:$PATH"
           export CC="ccache clang"
-          echo "===== BUILD MT7601U.KO ====="
           make -j2 O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KBUILD_MODPOST_WARN=1 M="$DRIVER_DIR" modules
-          echo "===== LOCATE MT7601U.KO ====="
           KO=$(find "$DRIVER_DIR" "$KERNEL_DIR/out" -type f -name 'mt7601u.ko' -print -quit)
           if [ -z "$KO" ]; then
             echo "ERROR: mt7601u.ko was not generated"
@@ -312,16 +243,10 @@ jobs:
           fi
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
           cp "$KO" "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
-          echo "===== VERIFY OUTPUT ====="
           ls -lh "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
           file "$GITHUB_WORKSPACE/artifacts/mt7601u.ko"
-          echo "===== UNDEFINED SYMBOLS ====="
           llvm-nm -u "$GITHUB_WORKSPACE/artifacts/mt7601u.ko" > "$GITHUB_WORKSPACE/artifacts/undefined-symbols.txt" || true
           cat "$GITHUB_WORKSPACE/artifacts/undefined-symbols.txt"
-
-      # ==========================================
-      # UPLOAD ONLY MT7601U.KO AND SYMBOL REPORT
-      # ==========================================
 
       - name: Upload MT7601U KO
         uses: actions/upload-artifact@v4
