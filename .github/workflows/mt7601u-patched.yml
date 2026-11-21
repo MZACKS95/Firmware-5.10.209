@@ -1,4 +1,4 @@
-name: Build MT7601U KO Only-patched
+name: Build MT7601u-patched
 
 on:
   workflow_dispatch:
@@ -204,7 +204,9 @@ jobs:
           import pathlib, os
           p = pathlib.Path(os.environ["MAIN_C"])
           t = p.read_text()
-          if ".get_channel" not in t:
+          if ".get_channel" in t:
+              print("ALREADY PATCHED")
+          else:
               func = """
           static int mt7601u_get_channel(struct ieee80211_hw *hw,
                                          struct ieee80211_chanctx_conf *ctx)
@@ -214,14 +216,14 @@ jobs:
               return hw->conf.chandef.chan->hw_value;
           }
           """
-              assert "static const struct ieee80211_ops mt7601u_ops" in t
-              t = t.replace("static const struct ieee80211_ops mt7601u_ops", func + "\nstatic const struct ieee80211_ops mt7601u_ops", 1)
-              assert ".config = mt7601u_config," in t
-              t = t.replace(".config = mt7601u_config,", ".config = mt7601u_config,\n\t.get_channel = mt7601u_get_channel,", 1)
+              old_ops = "const struct ieee80211_ops mt7601u_ops = {"
+              assert old_ops in t, "ops tidak ketemu"
+              t = t.replace(old_ops, func + "\n" + old_ops, 1)
+              old_cfg = "\t.config = mt7601u_config,"
+              assert old_cfg in t, "config tidak ketemu"
+              t = t.replace(old_cfg, old_cfg + "\n\t.get_channel = mt7601u_get_channel,", 1)
               p.write_text(t)
               print("PATCHED OK")
-          else:
-              print("ALREADY PATCHED")
           PY
           grep -n -A2 -B2 "get_channel" "$MAIN_C"
 
