@@ -1,4 +1,5 @@
-name: Build MT7601U KO Only-v1
+
+name: Build MT7601U KO Only
 
 on:
   workflow_dispatch:
@@ -11,29 +12,77 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
+      # ==========================================
+      # CHECKOUT REPOSITORY
+      # ==========================================
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ==========================================
+      # CACHE GOOGLE KERNEL GIT DATABASE
+      # ==========================================
+
+      - name: Cache Google Kernel
+        id: kernel-cache
+        uses: actions/cache@v4
+        with:
+          path: android/kernel/common/7c6bbcca33e1/.git
+          key: gki-source-7c6bbcca33e1
+
+      # ==========================================
+      # INSTALL DEPENDENCIES
+      # ==========================================
 
       - name: Dependencies
         run: bash config/dependencies.sh
 
+      # ==========================================
+      # GOOGLE KERNEL SOURCE
+      # ==========================================
+
       - name: Kernel Source
         run: bash config/kernel-source.sh
+
+      # ==========================================
+      # AOSP CLANG
+      # ==========================================
 
       - name: AOSP Clang
         run: bash config/clang.sh
 
+      # ==========================================
+      # ORIGINAL SYMBOLS
+      # ==========================================
+
       - name: Original Symbols
         run: bash config/symbols.sh
+
+      # ==========================================
+      # KERNEL CONFIGURATION
+      # ==========================================
 
       - name: Kernel Configuration
         run: bash config/kernel-config.sh
 
-      - name: Build MT7601U
+      # ==========================================
+      # BUILD MT7601U
+      # ==========================================
+
+      - name: Build Driver
         run: bash config/build-driver.sh
 
-      - name: Upload Artifact
+      # ==========================================
+      # UPLOAD ARTIFACT
+      # ==========================================
+
+      - name: Upload MT7601U
         uses: actions/upload-artifact@v4
         with:
           name: MT7601U-KO-5.10.209
           path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
