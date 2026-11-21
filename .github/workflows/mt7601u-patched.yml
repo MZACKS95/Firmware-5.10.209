@@ -165,9 +165,11 @@ jobs:
           EXPECTED="5.10.209-android12-9-00016-g7c6bbcca33e1-ab12029497"
           echo "Expected: $EXPECTED"
           echo "Actual:   $KERNEL_RELEASE"
-          if [ "$KERNEL_RELEASE" != "$EXPECTED" ]; then
-            echo "ERROR: Kernel release mismatch"
-            exit 1
+          KERNEL_RELEASE_CLEAN="${KERNEL_RELEASE%+}"
+          echo "Cleaned:  $KERNEL_RELEASE_CLEAN"
+          if [ "$KERNEL_RELEASE_CLEAN" != "$EXPECTED" ]; then
+          echo "ERROR: Kernel release mismatch"
+          exit 1
           fi
 
       - name: Install Original 248 Symbol CRCs
