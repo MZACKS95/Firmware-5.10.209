@@ -210,39 +210,6 @@ jobs:
           cat "$DRIVER_DIR/Makefile"
           ls -lh "$DRIVER_DIR"
 
-      - name: Patch MT7601U get_channel
-        run: |
-          set -e
-          MAIN_C="$GITHUB_WORKSPACE/android/kernel/common/7c6bbcca33e1/drivers/net/wireless/mediatek/mt7601u/main.c"
-          export MAIN_C
-          cp "$MAIN_C" "$MAIN_C.bak"
-          python3 - <<'PY'
-          import pathlib, os
-          p = pathlib.Path(os.environ["MAIN_C"])
-          t = p.read_text()
-          if ".get_channel" in t:
-              print("ALREADY PATCHED")
-          else:
-              func = """
-          static int mt7601u_get_channel(struct ieee80211_hw *hw,
-                                         struct ieee80211_chanctx_conf *ctx)
-          {
-              if (!hw->conf.chandef.chan)
-                  return -1;
-              return hw->conf.chandef.chan->hw_value;
-          }
-          """
-              old_ops = "const struct ieee80211_ops mt7601u_ops = {"
-              assert old_ops in t, "ops tidak ketemu"
-              t = t.replace(old_ops, func + "\n" + old_ops, 1)
-              old_cfg = "\t.config = mt7601u_config,"
-              assert old_cfg in t, "config tidak ketemu"
-              t = t.replace(old_cfg, old_cfg + "\n\t.get_channel = mt7601u_get_channel,", 1)
-              p.write_text(t)
-              print("PATCHED OK")
-          PY
-          grep -n -A2 -B2 "get_channel" "$MAIN_C"
-
       - name: Build MT7601U Only
         run: |
           set -e
