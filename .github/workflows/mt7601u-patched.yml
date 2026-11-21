@@ -1,4 +1,4 @@
-name: Build MT7601U-patched
+name: Build MT7601U KO Only
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android/kernel/common/7c6bbcca33e1
-          key: gki-source-7c6bbcca33e1-v2
+          key: gki-source-7c6bbcca33e1-v3
 
       - name: Checkout Google Kernel Source
         run: |
@@ -52,15 +52,12 @@ jobs:
           mkdir -p "$(dirname "$KERNEL_DIR")"
           if [ "${{ steps.kernel-cache.outputs.cache-hit }}" != "true" ]; then
             echo "===== CACHE MISS - CLONE FRESH ====="
-            git clone --depth=1 \
-              https://android.googlesource.com/kernel/common \
-              "$KERNEL_DIR"
+            git clone https://android.googlesource.com/kernel/common "$KERNEL_DIR"
           else
             echo "===== CACHE HIT - RESTORE FROM CACHE ====="
-            ls -lh "$KERNEL_DIR/arch/arm64/configs/gki_defconfig" || echo "CACHE CHECK: gki_defconfig belum ada, akan di-fetch"
+            ls -lh "$KERNEL_DIR/arch/arm64/configs/gki_defconfig" || echo "CACHE CHECK: gki_defconfig belum ada, akan di-restore via checkout"
           fi
           cd "$KERNEL_DIR"
-          git fetch --depth=1 origin 7c6bbcca33e1
           git checkout --detach 7c6bbcca33e1
           git reset --hard HEAD
           git clean -fd
