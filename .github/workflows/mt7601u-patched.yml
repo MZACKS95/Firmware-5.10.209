@@ -1,4 +1,4 @@
-name: Build MT7601U KO Only
+name: Build MT7601U-patched
 
 on:
   workflow_dispatch:
